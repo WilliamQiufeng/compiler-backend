@@ -1,5 +1,3 @@
-use std::ops;
-
 pub trait SemiLattice: PartialEq {
     fn meet(&self, other: &Self) -> Self;
     fn top() -> Self;

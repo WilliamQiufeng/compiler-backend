@@ -9,8 +9,12 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-
-    use crate::{semilattice::{SemiLattice, SemiLatticeLTE, SemiLatticeWrapper}, block::{Block, BlockTransfer, DataFlowGraph, BlockUpdate, BlockLattice}};
+    use petgraph::graph::NodeIndex;
+    use crate::{semilattice::{SemiLattice, SemiLatticeWrapper}, block::{Block, BlockTransfer, DataFlowGraph, BlockUpdate, BlockLattice}};
+    use crate::ir::{AddressMarker, DefaultBlockIDGenerator, BlockPartitioner};
+    use crate::ir::IR::{Assign, Equal, Jump};
+    use crate::ir::JumpType::{E, NE};
+    use crate::ir::Value::{Const, Variable};
 
     impl SemiLattice for u32 {
         fn meet(&self, other: &Self) -> Self {
@@ -27,12 +31,12 @@ mod tests {
     }
     type U32SemiLattice = SemiLatticeWrapper<u32>;
     struct U32Block {
-        block_number : u32,
+        block_number : NodeIndex,
         in_value : U32SemiLattice,
         out_value : U32SemiLattice
     }
     impl U32Block {
-        fn new(block_number: u32, in_value: U32SemiLattice, out_value: U32SemiLattice) -> Self {
+        fn new(block_number: NodeIndex, in_value: U32SemiLattice, out_value: U32SemiLattice) -> Self {
             Self {
                 block_number, in_value, out_value
             }
@@ -58,11 +62,19 @@ mod tests {
     impl Block for U32Block {
 
         fn entry() -> Self {
-            Self::new(0, U32SemiLattice::top(), U32SemiLattice::top())
+            Self::new(0.into(), U32SemiLattice::top(), U32SemiLattice::top())
         }
         
         fn exit() -> Self {
-            Self::new(u32::MAX, U32SemiLattice::top(), U32SemiLattice::top())
+            Self::new(u32::MAX.into(), U32SemiLattice::top(), U32SemiLattice::top())
+        }
+
+        fn set_node_index(&mut self, index: NodeIndex<u32>) {
+            todo!()
+        }
+
+        fn get_node_index(&self) -> NodeIndex<u32> {
+            todo!()
         }
     }
 
@@ -102,14 +114,31 @@ mod tests {
     #[test]
     fn graph() {
         let mut graph = DataFlowGraph::<U32Block>::new();
-        let b1 = graph.graph.add_node(U32Block::new(1, 0b10010.into(), 0b01101.into()));
-        let b2 = graph.graph.add_node(U32Block::new(2, 0b01110.into(), 0b01110.into()));
-        graph.graph.add_edge(graph.root, b1, ());
+        let b1 = graph.graph.add_node(U32Block::new(1.into(), 0b10010.into(), 0b01101.into()));
+        let b2 = graph.graph.add_node(U32Block::new(2.into(), 0b01110.into(), 0b01110.into()));
+        graph.graph.add_edge(graph.entry, b1, ());
         graph.graph.add_edge(b1, b2, ());
         graph.converge(crate::block::Direction::Forward);
         graph.graph.node_indices().for_each(|i| {
             let node = graph.graph.node_weight(i).unwrap();
             println!("{}, {}", node.get_in().0, node.get_out().0);
         });
+    }
+    #[test]
+    fn block_partition() {
+        let i = 0;
+        let j = 1;
+        let k = 2;
+        let t1 = 3;
+        let irs = vec![
+            Assign(i, Const(1)),
+            Assign(j, Const(1)),
+            Assign(k, Const(2)),
+            Equal(t1, Variable(j), Variable(k)),
+            Jump(E, AddressMarker::new(1), Variable(t1), Const(1)),
+            Jump(NE, AddressMarker::new(5), Variable(t1), Const(1))
+        ];
+        let partitioned = BlockPartitioner::generate_graph(irs);
+        println!("{:?}", partitioned)
     }
 }
