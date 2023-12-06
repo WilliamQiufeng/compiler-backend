@@ -3,14 +3,17 @@ use petgraph::{
     visit::Bfs,
 };
 
-use crate::semilattice::SemiLattice;
+use crate::semilattice::{SemiLattice};
 
-pub trait Block<SemiLatticeType: SemiLattice> {
+pub trait BlockLattice<SemiLatticeType: SemiLattice>: Block {
     fn get_in(&self) -> &SemiLatticeType;
-    fn set_in(&mut self, value: &SemiLatticeType);
+    fn set_in(&mut self, value: SemiLatticeType);
     fn get_out(&self) -> &SemiLatticeType;
-    fn set_out(&mut self, value: &SemiLatticeType);
+    fn set_out(&mut self, value: SemiLatticeType);
+}
+pub trait Block {
     fn entry() -> Self;
+    fn exit() -> Self;
 }
 #[derive(Clone, Copy, Debug)]
 pub enum Direction {
@@ -21,51 +24,43 @@ pub trait BlockUpdate<T: SemiLattice> {
     fn update(&mut self, direction: Direction) -> bool;
     fn converge(&mut self, direction: Direction);
 }
-pub trait BlockTransfer<SemiLatticeType, BlockType>
-where
-    SemiLatticeType: SemiLattice,
-    BlockType: Block<SemiLatticeType>,
-{
+pub trait BlockTransfer<SemiLatticeType: SemiLattice, BlockType: Block>: Block {
     fn transfer_forward(
         &self,
-        graph: &DataFlowGraph<SemiLatticeType, BlockType>,
+        graph: &DataFlowGraph<BlockType>,
         self_index: NodeIndex<u32>,
     ) -> SemiLatticeType;
     fn transfer_backward(
         &self,
-        graph: &DataFlowGraph<SemiLatticeType, BlockType>,
+        graph: &DataFlowGraph<BlockType>,
         self_index: NodeIndex<u32>,
     ) -> SemiLatticeType;
 }
-pub struct DataFlowGraph<SemiLatticeType, BlockType>
-where
-    SemiLatticeType: SemiLattice,
-    BlockType: Block<SemiLatticeType>,
+pub trait FullBlock<SemiLatticeType: SemiLattice, T: Block>:
+    Block + BlockLattice<SemiLatticeType> + BlockTransfer<SemiLatticeType, T>
 {
+}
+impl<
+        SemiLatticeType: SemiLattice,
+        T: Block + BlockLattice<SemiLatticeType> + BlockTransfer<SemiLatticeType, T>,
+    > FullBlock<SemiLatticeType, T> for T
+{
+}
+pub struct DataFlowGraph<BlockType: Block> {
     pub graph: StableDiGraph<BlockType, ()>,
     pub root: NodeIndex<u32>,
-    _phantom: std::marker::PhantomData<SemiLatticeType>,
 }
-impl<SemiLatticeType, BlockType> DataFlowGraph<SemiLatticeType, BlockType>
-where
-    SemiLatticeType: SemiLattice,
-    BlockType: Block<SemiLatticeType>,
-{
+impl<BlockType: Block> DataFlowGraph<BlockType> {
     pub fn new() -> Self {
         let mut graph = StableDiGraph::new();
         let root = graph.add_node(BlockType::entry());
-        Self {
-            graph,
-            root,
-            _phantom: std::marker::PhantomData,
-        }
+        Self { graph, root }
     }
 }
-impl<SemiLatticeType, BlockType> BlockUpdate<SemiLatticeType>
-    for DataFlowGraph<SemiLatticeType, BlockType>
+impl<SemiLatticeType, BlockType> BlockUpdate<SemiLatticeType> for DataFlowGraph<BlockType>
 where
     SemiLatticeType: SemiLattice,
-    BlockType: Block<SemiLatticeType> + BlockTransfer<SemiLatticeType, BlockType>,
+    BlockType: FullBlock<SemiLatticeType, BlockType>,
 {
     fn update(&mut self, direction: Direction) -> bool {
         let mut bfs = Bfs::new(&self.graph, self.root);
@@ -99,8 +94,8 @@ where
             changed = changed
                 || res_in != *self.graph[nx].get_in()
                 || res_out != *self.graph[nx].get_out();
-            self.graph[nx].set_in(&res_in);
-            self.graph[nx].set_out(&res_out);
+            self.graph[nx].set_in(res_in);
+            self.graph[nx].set_out(res_out);
         }
         changed
     }
