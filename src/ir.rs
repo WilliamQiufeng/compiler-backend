@@ -1,10 +1,8 @@
 use std::fmt::Display;
-use std::process::id;
 use fixedbitset::FixedBitSet;
 use petgraph::graph::NodeIndex;
-use petgraph::visit::NodeRef;
 use crate::block::{Block, DataFlowGraph};
-use crate::ir::BlockType::{Entry, Normal};
+use crate::ir::BlockType::{Normal};
 
 type GraphBlockID = NodeIndex<u32>;
 
@@ -81,21 +79,15 @@ impl BlockPartitioner {
         assigned_block.resize(src.len(), NodeIndex::new(0));
         is_head.set(0, true);
         // Mark block head
-        let mut set = |ir_index: usize| {
-            is_head.set(ir_index, true);
-            if ir_index + 1 < is_head.len() {
-                is_head.set(ir_index + 1, true);
-            }
-        };
-        let add_fallthrough = |i: usize, &current_index: &NodeIndex, assigned_block: &Vec<NodeIndex>, is_head: &FixedBitSet, res: &mut DataFlowGraph<CodeBlock>| {
-            if i + 1 == assigned_block.len() || is_head[i + 1] {
-                let fallthrough_index = if i + 1 == assigned_block.len() { res.exit } else { assigned_block[i + 1] };
-                res.graph.add_edge(current_index, fallthrough_index, ());
-            }
-        };
         for ir in &src {
             match ir {
-                IR::Jump(_, addr, _, _) => set(addr.ir_index as usize),
+                IR::Jump(_, addr, _, _) => {
+                    let ir_index = addr.ir_index as usize;
+                    is_head.set(ir_index, true);
+                    if ir_index + 1 < is_head.len() {
+                        is_head.set(ir_index + 1, true);
+                    }
+                },
                 _ => {}
             }
         }
@@ -111,33 +103,47 @@ impl BlockPartitioner {
         }
         // Build graph
         res.graph.add_edge(res.entry, *assigned_block.first().unwrap(), ());
-        let mut current_index = assigned_block[0];
-
-        for (i, ir) in src.into_iter().enumerate()
-        {
-            if is_head[i] {
-                current_index = assigned_block[i];
-            }
-            let mut new_ir = ir;
-            match new_ir {
-                IR::Jump(_, ref mut addr, _, _) => addr.block_id = Some(assigned_block[addr.ir_index as usize]),
-                _ => {}
-            }
-            res.graph.node_weight_mut(current_index).unwrap().irs.push(new_ir);
-            if let IR::Jump(jump_type, addr, _, _) = new_ir {
-                if let Some(target_block_index) = addr.block_id {
+        let mut peek_iter = src.into_iter().enumerate().peekable();
+        while let Some((i, ir)) = peek_iter.next() {
+            let current_index = assigned_block[i];
+            let mut ir = ir;
+            // Decide fallthrough
+            let fallthrough = match ir {
+                // Jump to another address -> Fallthrough depends on unconditional jump or end
+                IR::Jump(jump_type, ref mut addr, _, _) => {
+                    // Update the desired block id accordingly
+                    let mut target_block_index = assigned_block[addr.ir_index as usize];
+                    let fallthrough = match jump_type {
+                        JumpType::End => {
+                            target_block_index = res.exit;
+                            false
+                        }
+                        JumpType::Unconditional => false,
+                        _ => true
+                    };
+                    // Definitely having an edge to the target block
                     res.graph.add_edge(current_index, target_block_index, ());
+                    // Fill target block index
+                    addr.block_id = Some(target_block_index);
+                    fallthrough
                 }
-                match jump_type {
-                    JumpType::Unconditional => {}
-                    JumpType::End => {
-                        res.graph.add_edge(current_index, res.exit, ());
-                    }
-                    _ => {
-                        add_fallthrough(i, &current_index, &assigned_block, &is_head, &mut res);
-                    }
+                // Other instructions, fall through
+                _ => true
+            };
+            // Add IR to the block
+            res.graph.node_weight_mut(current_index).unwrap().irs.push(ir);
+            // Add fallthrough instructions
+            if !fallthrough { continue; }
+            let fallthrough_block_index = match peek_iter.peek() {
+                Some((peek_i, _)) => {
+                    // Next IR is not head of a block -> skip
+                    if !is_head[*peek_i] { continue; };
+                    assigned_block[*peek_i]
                 }
-            } else { add_fallthrough(i, &current_index, &assigned_block, &is_head, &mut res); }
+                // End of instructions
+                _ => res.exit
+            };
+            res.graph.add_edge(current_index, fallthrough_block_index, ());
         }
         res
     }
