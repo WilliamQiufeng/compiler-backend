@@ -70,11 +70,8 @@ mod tests {
         }
 
         fn set_node_index(&mut self, index: NodeIndex<u32>) {
-            todo!()
-        }
 
-        fn get_node_index(&self) -> NodeIndex<u32> {
-            todo!()
+            self.block_number = index;
         }
     }
 

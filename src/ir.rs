@@ -99,7 +99,7 @@ impl BlockPartitioner {
                 _ => {}
             }
         }
-        // Assign block id to irs
+        // Generate blocks
         let mut current_id = NodeIndex::new(0);
         for i in 0..src.len()
         {
@@ -109,9 +109,10 @@ impl BlockPartitioner {
             }
             assigned_block[i] = current_id;
         }
-        // Generate blocks
+        // Build graph
         res.graph.add_edge(res.entry, *assigned_block.first().unwrap(), ());
         let mut current_index = assigned_block[0];
+
         for (i, ir) in src.into_iter().enumerate()
         {
             if is_head[i] {
@@ -164,18 +165,14 @@ impl Display for CodeBlock {
 
 impl Block for CodeBlock {
     fn entry() -> Self {
-        Self { id: NodeIndex::new(0), block_type: BlockType::Entry, irs: vec![] }
+        Self { id: NodeIndex::default(), block_type: BlockType::Entry, irs: vec![] }
     }
 
     fn exit() -> Self {
-        Self { id: NodeIndex::new(1), block_type: BlockType::Exit, irs: vec![] }
+        Self { id: NodeIndex::default(), block_type: BlockType::Exit, irs: vec![] }
     }
 
     fn set_node_index(&mut self, index: NodeIndex<u32>) {
         self.id = index
-    }
-
-    fn get_node_index(&self) -> NodeIndex<u32> {
-        self.id
     }
 }

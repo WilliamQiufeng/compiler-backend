@@ -17,7 +17,6 @@ pub trait Block<Ix = u32> {
     fn entry() -> Self;
     fn exit() -> Self;
     fn set_node_index(&mut self, index: NodeIndex<Ix>);
-    fn get_node_index(&self, ) -> NodeIndex<Ix>;
 }
 
 
