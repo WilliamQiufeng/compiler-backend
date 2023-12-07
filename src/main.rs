@@ -11,7 +11,7 @@ fn main() {
 mod tests {
     use petgraph::graph::NodeIndex;
     use crate::{semilattice::{SemiLattice, SemiLatticeWrapper}, block::{Block, BlockTransfer, DataFlowGraph, BlockUpdate, BlockLattice}};
-    use crate::ir::{AddressMarker, DefaultBlockIDGenerator, BlockPartitioner};
+    use crate::ir::{AddressMarker, BlockPartitioner};
     use crate::ir::IR::{Assign, Equal, Jump};
     use crate::ir::JumpType::{E, NE};
     use crate::ir::Value::{Const, Variable};

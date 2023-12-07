@@ -12,15 +12,6 @@ pub enum BlockType {
     Exit,
     Normal,
 }
-
-pub trait BlockIDGenerator {
-    fn next_normal_id(&mut self) -> BlockType;
-}
-
-pub struct DefaultBlockIDGenerator {
-    current_id: GraphBlockID,
-}
-
 type Variable = u32;
 
 #[derive(Debug, Copy, Clone)]
