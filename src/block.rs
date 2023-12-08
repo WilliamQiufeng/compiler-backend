@@ -1,7 +1,13 @@
 use std::fmt::{Display, Formatter};
-use petgraph::{Outgoing, stable_graph::{NodeIndex, StableDiGraph}, visit::Bfs};
+
 use petgraph::visit::NodeCount;
-use crate::semilattice::{SemiLattice};
+use petgraph::{
+    stable_graph::{NodeIndex, StableDiGraph},
+    visit::Bfs,
+    Outgoing,
+};
+
+use crate::semilattice::SemiLattice;
 
 pub trait BlockLattice<SemiLatticeType: SemiLattice>: Block {
     fn get_in(&self) -> &SemiLatticeType;
@@ -16,7 +22,6 @@ pub trait Block<Ix = u32> {
     fn set_node_index(&mut self, index: NodeIndex<Ix>);
 }
 
-
 #[derive(Clone, Copy, Debug)]
 pub enum Direction {
     Forward = 0,
@@ -24,33 +29,44 @@ pub enum Direction {
 }
 
 pub trait BlockUpdate<T: SemiLattice> {
+    fn initialize(&mut self, direction: Direction);
     fn update(&mut self, direction: Direction) -> bool;
     fn converge(&mut self, direction: Direction);
 }
 
-pub trait BlockTransfer<SemiLatticeType: SemiLattice, BlockType: Block, GraphWeight>: Block {
+pub trait BlockTransfer<SemiLatticeType: SemiLattice, BlockType: Block, GraphWeight>:
+    Block
+{
     fn transfer_forward(
         &self,
+        in_value: &SemiLatticeType,
         graph: &DataFlowGraph<BlockType, GraphWeight>,
         self_index: NodeIndex<u32>,
     ) -> SemiLatticeType;
     fn transfer_backward(
         &self,
+        out_value: &SemiLatticeType,
         graph: &DataFlowGraph<BlockType, GraphWeight>,
         self_index: NodeIndex<u32>,
     ) -> SemiLatticeType;
+    fn entry_out(data_flow_graph: &DataFlowGraph<BlockType, GraphWeight>) -> SemiLatticeType;
+    fn exit_in(data_flow_graph: &DataFlowGraph<BlockType, GraphWeight>) -> SemiLatticeType;
+    fn top(data_flow_graph: &DataFlowGraph<BlockType, GraphWeight>) -> SemiLatticeType;
+    fn bottom(data_flow_graph: &DataFlowGraph<BlockType, GraphWeight>) -> SemiLatticeType;
 }
 
 pub trait FullBlock<SemiLatticeType: SemiLattice, T: Block, GraphWeight>:
-Block + BlockLattice<SemiLatticeType> + BlockTransfer<SemiLatticeType, T, GraphWeight>
-{}
+    Block + BlockLattice<SemiLatticeType> + BlockTransfer<SemiLatticeType, T, GraphWeight>
+{
+}
 
 impl<
-    SemiLatticeType: SemiLattice,
-    T: Block + BlockLattice<SemiLatticeType> + BlockTransfer<SemiLatticeType, T, Weight>,
-    Weight,
-> FullBlock<SemiLatticeType, T, Weight> for T
-{}
+        SemiLatticeType: SemiLattice,
+        T: Block + BlockLattice<SemiLatticeType> + BlockTransfer<SemiLatticeType, T, Weight>,
+        Weight,
+    > FullBlock<SemiLatticeType, T, Weight> for T
+{
+}
 
 #[derive(Debug)]
 pub struct DataFlowGraph<BlockType: Block, Weight = ()> {
@@ -67,15 +83,48 @@ impl<BlockType: Block, Weight> DataFlowGraph<BlockType, Weight> {
         let exit = graph.add_node(BlockType::exit());
         graph.node_weight_mut(entry).unwrap().set_node_index(entry);
         graph.node_weight_mut(exit).unwrap().set_node_index(exit);
-        Self { graph, entry, exit, weight }
+        Self {
+            graph,
+            entry,
+            exit,
+            weight,
+        }
     }
 }
 
-impl<SemiLatticeType, BlockType, Weight> BlockUpdate<SemiLatticeType> for DataFlowGraph<BlockType, Weight>
-    where
-        SemiLatticeType: SemiLattice,
-        BlockType: FullBlock<SemiLatticeType, BlockType, Weight>,
+impl<SemiLatticeType, BlockType, Weight> BlockUpdate<SemiLatticeType>
+    for DataFlowGraph<BlockType, Weight>
+where
+    SemiLatticeType: SemiLattice,
+    BlockType: FullBlock<SemiLatticeType, BlockType, Weight>,
 {
+    fn initialize(&mut self, direction: Direction) {
+        let mut bfs = Bfs::new(&self.graph, self.entry);
+        match direction {
+            Direction::Forward => {
+                let init_out = BlockType::entry_out(self);
+                self.graph
+                    .node_weight_mut(self.entry)
+                    .unwrap()
+                    .set_out(init_out);
+            }
+            Direction::Backward => {
+                let init_in = BlockType::exit_in(self);
+                self.graph
+                    .node_weight_mut(self.exit)
+                    .unwrap()
+                    .set_in(init_in);
+            }
+        }
+        while let Some(nx) = bfs.next(&self.graph) {
+            let val = BlockType::top(self);
+            match direction {
+                Direction::Forward => self.graph.node_weight_mut(nx).unwrap().set_out(val),
+                Direction::Backward => self.graph.node_weight_mut(nx).unwrap().set_in(val),
+            }
+        }
+    }
+
     fn update(&mut self, direction: Direction) -> bool {
         let mut bfs = Bfs::new(&self.graph, self.entry);
         let mut changed = false;
@@ -85,22 +134,22 @@ impl<SemiLatticeType, BlockType, Weight> BlockUpdate<SemiLatticeType> for DataFl
                     let res_in = self
                         .graph
                         .neighbors_directed(nx, petgraph::Direction::Incoming)
-                        .fold(SemiLatticeType::top(), |cur, neighbor_index| {
+                        .fold(BlockType::top(self), |cur, neighbor_index| {
                             let block = &self.graph[neighbor_index];
                             cur.meet(block.get_out())
                         });
-                    let res_out = self.graph[nx].transfer_forward(self, nx);
+                    let res_out = self.graph[nx].transfer_forward(&res_in, self, nx);
                     (res_in, res_out)
                 }
                 Direction::Backward => {
                     let res_out = self
                         .graph
                         .neighbors_directed(nx, petgraph::Direction::Outgoing)
-                        .fold(SemiLatticeType::top(), |cur, neighbor_index| {
+                        .fold(BlockType::top(self), |cur, neighbor_index| {
                             let block = &self.graph[neighbor_index];
                             cur.meet(block.get_in())
                         });
-                    let res_in = self.graph[nx].transfer_backward(self, nx);
+                    let res_in = self.graph[nx].transfer_backward(&res_out, self, nx);
                     (res_in, res_out)
                 }
             };
@@ -115,6 +164,7 @@ impl<SemiLatticeType, BlockType, Weight> BlockUpdate<SemiLatticeType> for DataFl
     }
 
     fn converge(&mut self, direction: Direction) {
+        self.initialize(direction);
         let mut changed = true;
         while changed {
             changed = self.update(direction);
@@ -124,7 +174,12 @@ impl<SemiLatticeType, BlockType, Weight> BlockUpdate<SemiLatticeType> for DataFl
 
 impl<BlockType: Block + Display, Weight: Display> Display for DataFlowGraph<BlockType, Weight> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Graph Entry={:?} Exit={:?}\nWeight:{:}", self.entry, self.exit, self.weight).expect("Err");
+        writeln!(
+            f,
+            "Graph Entry={:?} Exit={:?}\nWeight:{:}",
+            self.entry, self.exit, self.weight
+        )
+        .expect("Err");
         writeln!(f, "Blocks (n={}):", self.graph.node_count()).expect("?");
         self.graph.node_weights().for_each(|n| {
             writeln!(f, "{}", n).expect("Node weight failed");

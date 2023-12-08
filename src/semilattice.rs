@@ -1,7 +1,5 @@
 pub trait SemiLattice: PartialEq {
     fn meet(&self, other: &Self) -> Self;
-    fn top() -> Self;
-    fn bottom() -> Self;
 }
 pub trait Lattice: SemiLattice + Ord {
     fn join(&self, other: &Self) -> Self;
@@ -15,14 +13,6 @@ pub struct SemiLatticeWrapper<T: SemiLattice>(pub T);
 impl<T: SemiLattice> SemiLattice for SemiLatticeWrapper<T> {
     fn meet(&self, other: &Self) -> Self {
         Self(self.0.meet(&other.0))
-    }
-
-    fn top() -> Self {
-        Self(T::top())
-    }
-
-    fn bottom() -> Self {
-        Self(T::bottom())
     }
 }
 impl<T: SemiLattice> PartialEq for SemiLatticeWrapper<T> {

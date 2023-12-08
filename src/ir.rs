@@ -10,6 +10,7 @@ use petgraph::graph::NodeIndex;
 
 use crate::block::{Block, DataFlowGraph};
 use crate::ir::BlockType::Normal;
+use crate::reach_lattice::ReachLattice;
 
 type GraphBlockID = NodeIndex<u32>;
 
@@ -166,13 +167,13 @@ impl From<Vec<IR>> for DataFlowGraph<CodeBlock, CodeBlockGraphWeight> {
         assigned_block.resize(res.weight.irs.len(), NodeIndex::new(0));
         is_head.set(0, true);
         // Mark block head
-        for ir in &res.weight.irs {
+        for (i, ir) in res.weight.irs.iter().enumerate() {
             match ir.borrow().deref() {
                 IR::Jump(_, addr, _, _, _) => {
-                    let ir_index = addr.ir_index as usize;
-                    is_head.set(ir_index, true);
-                    if ir_index + 1 < is_head.len() {
-                        is_head.set(ir_index + 1, true);
+                    let jump_target_index = addr.ir_index as usize;
+                    is_head.set(jump_target_index, true);
+                    if i + 1 < is_head.len() {
+                        is_head.set(i + 1, true);
                     }
                 }
                 _ => {}
@@ -263,6 +264,8 @@ pub struct CodeBlock {
     pub id: GraphBlockID,
     pub block_type: BlockType,
     pub irs_range: Vec<Rc<RefCell<IR>>>,
+    pub reach_in: ReachLattice,
+    pub reach_out: ReachLattice,
 }
 
 impl CodeBlock {
@@ -271,13 +274,16 @@ impl CodeBlock {
             id,
             block_type,
             irs_range: irs,
+            reach_in: ReachLattice::new(0),
+            reach_out: ReachLattice::new(0),
         }
     }
 }
 
 impl Display for CodeBlock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Block {:?}:", self.id.index());
+        writeln!(f, "Block {:?}:", self.id.index()).expect("?");
+        writeln!(f, "IN = {}, OUT = {}", self.reach_in, self.reach_out).expect("IN and OUT panic");
         self.irs_range
             .iter()
             .for_each(|ir| writeln!(f, "  {}", ir.borrow().deref()).expect(""));
@@ -291,6 +297,8 @@ impl Block for CodeBlock {
             id: NodeIndex::default(),
             block_type: BlockType::Entry,
             irs_range: vec![],
+            reach_in: ReachLattice::new(0),
+            reach_out: ReachLattice::new(0),
         }
     }
 
@@ -299,6 +307,8 @@ impl Block for CodeBlock {
             id: NodeIndex::default(),
             block_type: BlockType::Exit,
             irs_range: vec![],
+            reach_in: ReachLattice::new(0),
+            reach_out: ReachLattice::new(0),
         }
     }
 

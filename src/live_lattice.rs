@@ -1,17 +1,20 @@
-use std::collections::HashSet;
-
 use fixedbitset::FixedBitSet;
 
-use crate::{block::{Block, BlockTransfer, BlockLattice}, semilattice::SemiLattice, ir::CodeBlock};
+use crate::block::DataFlowGraph;
 use crate::ir::CodeBlockGraphWeight;
+use crate::{
+    block::{BlockLattice, BlockTransfer},
+    ir::CodeBlock,
+    semilattice::SemiLattice,
+};
 
 pub struct LiveLattice {
-    value: FixedBitSet
+    value: FixedBitSet,
 }
 impl LiveLattice {
     pub fn new(capacity: usize) -> Self {
         Self {
-            value: FixedBitSet::with_capacity(capacity)
+            value: FixedBitSet::with_capacity(capacity),
         }
     }
 }
@@ -29,17 +32,7 @@ impl SemiLattice for LiveLattice {
     fn meet(&self, other: &Self) -> Self {
         let mut res_value = FixedBitSet::with_capacity(self.value.len());
         res_value.union_with(&other.value);
-        Self {
-            value: res_value
-        }
-    }
-
-    fn top() -> Self {
-        todo!()
-    }
-
-    fn bottom() -> Self {
-        todo!()
+        Self { value: res_value }
     }
 }
 impl BlockLattice<LiveLattice> for CodeBlock {
@@ -62,6 +55,7 @@ impl BlockLattice<LiveLattice> for CodeBlock {
 impl BlockTransfer<LiveLattice, CodeBlock, CodeBlockGraphWeight> for CodeBlock {
     fn transfer_forward(
         &self,
+        in_value: &LiveLattice,
         graph: &crate::block::DataFlowGraph<CodeBlock, CodeBlockGraphWeight>,
         self_index: petgraph::prelude::NodeIndex<u32>,
     ) -> LiveLattice {
@@ -70,9 +64,26 @@ impl BlockTransfer<LiveLattice, CodeBlock, CodeBlockGraphWeight> for CodeBlock {
 
     fn transfer_backward(
         &self,
+        out_value: &LiveLattice,
         graph: &crate::block::DataFlowGraph<CodeBlock, CodeBlockGraphWeight>,
         self_index: petgraph::prelude::NodeIndex<u32>,
     ) -> LiveLattice {
+        todo!()
+    }
+
+    fn entry_out(data_flow_graph: &DataFlowGraph<CodeBlock, CodeBlockGraphWeight>) -> LiveLattice {
+        todo!()
+    }
+
+    fn exit_in(data_flow_graph: &DataFlowGraph<CodeBlock, CodeBlockGraphWeight>) -> LiveLattice {
+        todo!()
+    }
+
+    fn top(data_flow_graph: &DataFlowGraph<CodeBlock, CodeBlockGraphWeight>) -> LiveLattice {
+        todo!()
+    }
+
+    fn bottom(data_flow_graph: &DataFlowGraph<CodeBlock, CodeBlockGraphWeight>) -> LiveLattice {
         todo!()
     }
 }
