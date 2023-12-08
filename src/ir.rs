@@ -1,15 +1,15 @@
-use std::any::TypeId;
-use std::cell::{RefCell, RefMut};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::ops::{Deref, DerefMut, Range, RangeInclusive, RangeToInclusive};
+use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::slice::SliceIndex;
+
 use fixedbitset::FixedBitSet;
 use petgraph::graph::NodeIndex;
+
 use crate::block::{Block, DataFlowGraph};
-use crate::ir::BlockType::{Normal};
-use crate::semilattice::SemiLattice;
+use crate::ir::BlockType::Normal;
 
 type GraphBlockID = NodeIndex<u32>;
 
@@ -30,10 +30,12 @@ pub struct AddressMarker {
 
 impl AddressMarker {
     pub fn new(ir_index: u32) -> Self {
-        Self { ir_index, block_id: None }
+        Self {
+            ir_index,
+            block_id: None,
+        }
     }
 }
-
 
 #[derive(Debug, Copy, Clone)]
 pub enum Value {
@@ -152,8 +154,13 @@ impl DataFlowGraph<CodeBlock, CodeBlockGraphWeight> {}
 impl From<Vec<IR>> for DataFlowGraph<CodeBlock, CodeBlockGraphWeight> {
     fn from(src: Vec<IR>) -> Self {
         let mut res = Self::new(CodeBlockGraphWeight::new());
-        res.weight.irs = src.into_iter().map(|ir| Rc::new(RefCell::new(ir))).collect();
-        if res.weight.irs.is_empty() { return res; }
+        res.weight.irs = src
+            .into_iter()
+            .map(|ir| Rc::new(RefCell::new(ir)))
+            .collect();
+        if res.weight.irs.is_empty() {
+            return res;
+        }
         let mut is_head = FixedBitSet::with_capacity(res.weight.irs.len());
         let mut assigned_block = vec![];
         assigned_block.resize(res.weight.irs.len(), NodeIndex::new(0));
@@ -173,28 +180,34 @@ impl From<Vec<IR>> for DataFlowGraph<CodeBlock, CodeBlockGraphWeight> {
         }
         // Generate blocks
         let mut current_id = NodeIndex::new(0);
-        let mut is_not_entry = false;
-        let mut block_start = 0;
-        for i in 0..res.weight.irs.len()
-        {
+        for i in 0..res.weight.irs.len() {
             if is_head[i] {
-                if is_not_entry {
-                    current_id = res.graph.add_node(CodeBlock::new(current_id, Normal, res.weight.irs[block_start..=i].to_vec()));
-                    res.graph.node_weight_mut(current_id).unwrap().id = current_id;
-                }
-                is_not_entry = true;
-                block_start = i;
+                current_id = res
+                    .graph
+                    .add_node(CodeBlock::new(current_id, Normal, vec![]));
+                res.graph.node_weight_mut(current_id).unwrap().id = current_id;
             }
+            res.graph
+                .node_weight_mut(current_id)
+                .unwrap()
+                .irs_range
+                .push(res.weight.irs[i].clone());
             assigned_block[i] = current_id;
         }
         // Build graph
-        res.graph.add_edge(res.entry, *assigned_block.first().unwrap(), ());
+        res.graph
+            .add_edge(res.entry, *assigned_block.first().unwrap(), ());
         let mut peek_iter = res.weight.irs.iter_mut().enumerate().peekable();
         while let Some((i, ir)) = peek_iter.next() {
             let current_index = assigned_block[i];
             match ir.borrow_mut().deref_mut() {
-                IR::Quad(_, _, _, _, ref mut info) => {
+                IR::Quad(_, var, _, _, ref mut info) => {
                     info.declaration_number = Some(res.weight.assignment_count);
+                    res.weight
+                        .variable_assignment_map
+                        .entry(*var)
+                        .or_default()
+                        .push(info.declaration_number.unwrap());
                     res.weight.assignment_count += 1
                 }
                 _ => {}
@@ -211,7 +224,7 @@ impl From<Vec<IR>> for DataFlowGraph<CodeBlock, CodeBlockGraphWeight> {
                             false
                         }
                         JumpType::Unconditional => false,
-                        _ => true
+                        _ => true,
                     };
                     // Definitely having an edge to the target block
                     res.graph.add_edge(current_index, target_block_index, ());
@@ -220,20 +233,25 @@ impl From<Vec<IR>> for DataFlowGraph<CodeBlock, CodeBlockGraphWeight> {
                     fallthrough
                 }
                 // Other instructions, fall through
-                _ => true
+                _ => true,
             };
             // Add fallthrough instructions
-            if !fallthrough { continue; }
+            if !fallthrough {
+                continue;
+            }
             let fallthrough_block_index = match peek_iter.peek() {
                 Some((peek_i, _)) => {
                     // Next IR is not head of a block -> skip
-                    if !is_head[*peek_i] { continue; };
+                    if !is_head[*peek_i] {
+                        continue;
+                    };
                     assigned_block[*peek_i]
                 }
                 // End of instructions
-                _ => res.exit
+                _ => res.exit,
             };
-            res.graph.add_edge(current_index, fallthrough_block_index, ());
+            res.graph
+                .add_edge(current_index, fallthrough_block_index, ());
         }
 
         res
@@ -241,7 +259,7 @@ impl From<Vec<IR>> for DataFlowGraph<CodeBlock, CodeBlockGraphWeight> {
 }
 
 #[derive(Debug)]
-pub struct CodeBlock{
+pub struct CodeBlock {
     pub id: GraphBlockID,
     pub block_type: BlockType,
     pub irs_range: Vec<Rc<RefCell<IR>>>,
@@ -249,25 +267,39 @@ pub struct CodeBlock{
 
 impl CodeBlock {
     pub fn new(id: GraphBlockID, block_type: BlockType, irs: Vec<Rc<RefCell<IR>>>) -> Self {
-        Self { id, block_type, irs_range: irs }
+        Self {
+            id,
+            block_type,
+            irs_range: irs,
+        }
     }
 }
 
 impl Display for CodeBlock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Block {:?}:", self.id.index());
-        self.irs_range.iter().for_each(|ir| writeln!(f, "  {}", ir.borrow().deref()).expect(""));
+        self.irs_range
+            .iter()
+            .for_each(|ir| writeln!(f, "  {}", ir.borrow().deref()).expect(""));
         Ok(())
     }
 }
 
 impl Block for CodeBlock {
     fn entry() -> Self {
-        Self { id: NodeIndex::default(), block_type: BlockType::Entry, irs_range: vec![] }
+        Self {
+            id: NodeIndex::default(),
+            block_type: BlockType::Entry,
+            irs_range: vec![],
+        }
     }
 
     fn exit() -> Self {
-        Self { id: NodeIndex::default(), block_type: BlockType::Exit, irs_range: vec![] }
+        Self {
+            id: NodeIndex::default(),
+            block_type: BlockType::Exit,
+            irs_range: vec![],
+        }
     }
 
     fn set_node_index(&mut self, index: NodeIndex<u32>) {
