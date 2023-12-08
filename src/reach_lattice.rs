@@ -1,12 +1,12 @@
-use std::collections::HashSet;
-
 use fixedbitset::FixedBitSet;
 
 use crate::{
-    block::{Block, BlockLattice, BlockTransfer},
+    block::{BlockLattice, BlockTransfer},
     ir::CodeBlock,
     semilattice::SemiLattice,
 };
+use crate::ir::{CodeBlockGraphWeight, IR, IRInformation};
+
 pub struct ReachLattice {
     value: FixedBitSet,
 }
@@ -14,6 +14,21 @@ impl ReachLattice {
     pub fn new(capacity: usize) -> Self {
         Self {
             value: FixedBitSet::with_capacity(capacity),
+        }
+    }
+    pub fn gen_var(ir_info: &IRInformation, code_block_graph_weight: CodeBlockGraphWeight) -> Self {
+        let mut set = FixedBitSet::with_capacity(code_block_graph_weight.assignment_count);
+        set.set(ir_info.declaration_number.expect("No declaration number"), true);
+        Self {
+            value: set
+        }
+    }
+    pub fn kill_var(ir_info: &IRInformation, code_block_graph_weight: CodeBlockGraphWeight) -> Self {
+        let mut set = FixedBitSet::with_capacity(code_block_graph_weight.assignment_count);
+        set.set_range(.., true);
+        set.set(ir_info.declaration_number.expect("No declaration number"), false);
+        Self {
+            value: set
         }
     }
 }
@@ -59,10 +74,10 @@ impl BlockLattice<ReachLattice> for CodeBlock {
         todo!()
     }
 }
-impl BlockTransfer<ReachLattice, CodeBlock> for CodeBlock {
+impl BlockTransfer<ReachLattice, CodeBlock, CodeBlockGraphWeight> for CodeBlock {
     fn transfer_forward(
         &self,
-        graph: &crate::block::DataFlowGraph<CodeBlock>,
+        graph: &crate::block::DataFlowGraph<CodeBlock, CodeBlockGraphWeight>,
         self_index: petgraph::prelude::NodeIndex<u32>,
     ) -> ReachLattice {
         todo!()
@@ -70,7 +85,7 @@ impl BlockTransfer<ReachLattice, CodeBlock> for CodeBlock {
 
     fn transfer_backward(
         &self,
-        graph: &crate::block::DataFlowGraph<CodeBlock>,
+        graph: &crate::block::DataFlowGraph<CodeBlock, CodeBlockGraphWeight>,
         self_index: petgraph::prelude::NodeIndex<u32>,
     ) -> ReachLattice {
         todo!()

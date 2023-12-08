@@ -11,9 +11,10 @@ fn main() {
 mod tests {
     use petgraph::graph::NodeIndex;
     use crate::{semilattice::{SemiLattice, SemiLatticeWrapper}, block::{Block, BlockTransfer, DataFlowGraph, BlockUpdate, BlockLattice}};
-    use crate::ir::{AddressMarker, BlockPartitioner};
-    use crate::ir::IR::{Assign, Equal, Jump};
-    use crate::ir::JumpType::{E, NE};
+    use crate::ir::{AddressMarker, IRInformation, QuadType, Value};
+    use crate::ir::IR::{Jump, Quad};
+    use crate::ir::JumpType::{Bool, E, NE, Unconditional};
+    use crate::ir::QuadType::Assign;
     use crate::ir::Value::{Const, Variable};
 
     impl SemiLattice for u32 {
@@ -75,7 +76,7 @@ mod tests {
         }
     }
 
-    impl BlockTransfer<U32SemiLattice, U32Block> for U32Block {
+    impl BlockTransfer<U32SemiLattice, U32Block, ()> for U32Block {
         fn transfer_forward(
             &self,
             graph: &crate::block::DataFlowGraph<U32Block>,
@@ -110,7 +111,7 @@ mod tests {
     }
     #[test]
     fn graph() {
-        let mut graph = DataFlowGraph::<U32Block>::new();
+        let mut graph = DataFlowGraph::<U32Block>::new(());
         let b1 = graph.graph.add_node(U32Block::new(1.into(), 0b10010.into(), 0b01101.into()));
         let b2 = graph.graph.add_node(U32Block::new(2.into(), 0b01110.into(), 0b01110.into()));
         graph.graph.add_edge(graph.entry, b1, ());
@@ -128,14 +129,14 @@ mod tests {
         let k = 2;
         let t1 = 3;
         let irs = vec![
-            Assign(i, Const(1)),
-            Assign(j, Const(1)),
-            Assign(k, Const(2)),
-            Equal(t1, Variable(j), Variable(k)),
-            Jump(E, AddressMarker::new(1), Variable(t1), Const(1)),
-            Jump(NE, AddressMarker::new(5), Variable(t1), Const(1))
+            Quad(Assign, i, Const(1), Value::None, IRInformation::default()),
+            Quad(Assign, j, Const(1), Value::None, IRInformation::default()),
+            Quad(Assign, k, Const(2), Value::None, IRInformation::default()),
+            Quad(QuadType::E, t1, Variable(j), Variable(k), IRInformation::default()),
+            Jump(Unconditional, AddressMarker::new(5), Value::None, Value::None, IRInformation::default()),
+            Jump(Bool, AddressMarker::new(1), Variable(t1), Value::None, IRInformation::default()),
         ];
-        let partitioned = BlockPartitioner::generate_graph(irs);
-        println!("{:?}", partitioned)
+        let partitioned = DataFlowGraph::from(irs);
+        println!("{:}", partitioned)
     }
 }

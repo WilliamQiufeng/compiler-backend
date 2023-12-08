@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use fixedbitset::FixedBitSet;
 
 use crate::{block::{Block, BlockTransfer, BlockLattice}, semilattice::SemiLattice, ir::CodeBlock};
+use crate::ir::CodeBlockGraphWeight;
+
 pub struct LiveLattice {
     value: FixedBitSet
 }
@@ -57,10 +59,10 @@ impl BlockLattice<LiveLattice> for CodeBlock {
         todo!()
     }
 }
-impl BlockTransfer<LiveLattice, CodeBlock> for CodeBlock {
+impl BlockTransfer<LiveLattice, CodeBlock, CodeBlockGraphWeight> for CodeBlock {
     fn transfer_forward(
         &self,
-        graph: &crate::block::DataFlowGraph<CodeBlock>,
+        graph: &crate::block::DataFlowGraph<CodeBlock, CodeBlockGraphWeight>,
         self_index: petgraph::prelude::NodeIndex<u32>,
     ) -> LiveLattice {
         todo!()
@@ -68,7 +70,7 @@ impl BlockTransfer<LiveLattice, CodeBlock> for CodeBlock {
 
     fn transfer_backward(
         &self,
-        graph: &crate::block::DataFlowGraph<CodeBlock>,
+        graph: &crate::block::DataFlowGraph<CodeBlock, CodeBlockGraphWeight>,
         self_index: petgraph::prelude::NodeIndex<u32>,
     ) -> LiveLattice {
         todo!()
