@@ -13,7 +13,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct ReachLattice {
-    value: FixedBitSet,
+    pub value: FixedBitSet,
 }
 
 impl ReachLattice {
@@ -174,6 +174,8 @@ impl BlockTransfer<ReachLattice, CodeBlock, CodeBlockGraphWeight> for CodeBlock 
     }
 
     fn bottom(data_flow_graph: &DataFlowGraph<CodeBlock, CodeBlockGraphWeight>) -> ReachLattice {
-        unimplemented!("Invalid data flow")
+        let mut top: ReachLattice = Self::top(data_flow_graph);
+        top.value.toggle_range(..);
+        top
     }
 }

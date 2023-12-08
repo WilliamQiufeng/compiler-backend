@@ -13,7 +13,7 @@ mod tests {
 
     use crate::block::Direction::Forward;
     use crate::ir::JumpType::{Bool, E};
-    use crate::ir::QuadType::Assign;
+    use crate::ir::QuadType::{Add, Assign, Sub};
     use crate::ir::Value::{Const, Variable};
     use crate::ir::IR::{Jump, Quad};
     use crate::ir::{
@@ -197,6 +197,71 @@ mod tests {
                 Assign,
                 k,
                 Variable(t1),
+                Value::None,
+                IRInformation::default(),
+            ),
+        ];
+        let mut partitioned = DataFlowGraph::from(irs);
+        <DataFlowGraph<CodeBlock, CodeBlockGraphWeight> as BlockUpdate<ReachLattice>>::converge(
+            &mut partitioned,
+            Forward,
+        );
+        println!("{:}", partitioned)
+    }
+
+    #[test]
+    fn block_reach() {
+        let i = 0;
+        let j = 1;
+        let a = 2;
+        let m = 3;
+        let n = 4;
+        let u1 = 5;
+        let u2 = 6;
+        let u3 = 7;
+        let irs = vec![
+            Quad(Sub, i, Variable(m), Const(1), IRInformation::default()),
+            Quad(
+                Assign,
+                j,
+                Variable(n),
+                Value::None,
+                IRInformation::default(),
+            ),
+            Quad(
+                Assign,
+                a,
+                Variable(u1),
+                Value::None,
+                IRInformation::default(),
+            ),
+            Quad(Add, i, Variable(i), Const(1), IRInformation::default()),
+            Quad(Sub, j, Variable(j), Const(1), IRInformation::default()),
+            Jump(
+                Bool,
+                AddressMarker::new(7),
+                Value::None,
+                Value::None,
+                IRInformation::default(),
+            ),
+            Quad(
+                Assign,
+                a,
+                Variable(u2),
+                Value::None,
+                IRInformation::default(),
+            ),
+            Quad(
+                Assign,
+                i,
+                Variable(u3),
+                Value::None,
+                IRInformation::default(),
+            ),
+            Jump(
+                Bool,
+                AddressMarker::new(3),
+                Value::None,
                 Value::None,
                 IRInformation::default(),
             ),
