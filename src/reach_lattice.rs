@@ -27,14 +27,10 @@ impl ReachLattice {
      */
     pub fn gen_var(ir: &IR, code_block_graph_weight: &CodeBlockGraphWeight) -> Self {
         let mut set = FixedBitSet::with_capacity(code_block_graph_weight.assignment_count);
-        match ir {
-            IR::Quad(_, var, _, _, info) => match info.declaration_number {
-                Some(declaration_number) => {
-                    set.set(declaration_number, true);
-                }
-                _ => {}
-            },
-            _ => {}
+        if let IR::Quad(_, _, _, _, info) = ir {
+            if let Some(declaration_number) = info.declaration_number {
+                set.set(declaration_number, true);
+            }
         }
         Self { value: set }
     }
@@ -115,22 +111,12 @@ impl BlockLattice<ReachLattice> for CodeBlock {
     }
 }
 
-impl CodeBlock {
-    fn transfer_reach(
-        &self,
-        input: ReachLattice,
-        ir: &IR,
-        graph: &DataFlowGraph<CodeBlock, CodeBlockGraphWeight>,
-    ) {
-    }
-}
-
 impl BlockTransfer<ReachLattice, CodeBlock, CodeBlockGraphWeight> for CodeBlock {
     fn transfer_forward(
         &self,
         in_value: &ReachLattice,
         graph: &DataFlowGraph<CodeBlock, CodeBlockGraphWeight>,
-        self_index: petgraph::prelude::NodeIndex<u32>,
+        _: petgraph::prelude::NodeIndex<u32>,
     ) -> ReachLattice {
         let mut current_gen = FixedBitSet::with_capacity(graph.weight.assignment_count);
         let mut current_kill = FixedBitSet::with_capacity(graph.weight.assignment_count);
@@ -154,9 +140,9 @@ impl BlockTransfer<ReachLattice, CodeBlock, CodeBlockGraphWeight> for CodeBlock 
 
     fn transfer_backward(
         &self,
-        out_value: &ReachLattice,
-        graph: &DataFlowGraph<CodeBlock, CodeBlockGraphWeight>,
-        self_index: petgraph::prelude::NodeIndex<u32>,
+        _: &ReachLattice,
+        _: &DataFlowGraph<CodeBlock, CodeBlockGraphWeight>,
+        _: petgraph::prelude::NodeIndex<u32>,
     ) -> ReachLattice {
         todo!()
     }
@@ -165,7 +151,7 @@ impl BlockTransfer<ReachLattice, CodeBlock, CodeBlockGraphWeight> for CodeBlock 
         Self::top(data_flow_graph)
     }
 
-    fn exit_in(data_flow_graph: &DataFlowGraph<CodeBlock, CodeBlockGraphWeight>) -> ReachLattice {
+    fn exit_in(_: &DataFlowGraph<CodeBlock, CodeBlockGraphWeight>) -> ReachLattice {
         unimplemented!("Invalid data flow")
     }
 

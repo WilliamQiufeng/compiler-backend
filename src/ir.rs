@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
-use std::slice::SliceIndex;
 
 use fixedbitset::FixedBitSet;
 use petgraph::graph::NodeIndex;
@@ -168,15 +167,12 @@ impl From<Vec<IR>> for DataFlowGraph<CodeBlock, CodeBlockGraphWeight> {
         is_head.set(0, true);
         // Mark block head
         for (i, ir) in res.weight.irs.iter().enumerate() {
-            match ir.borrow().deref() {
-                IR::Jump(_, addr, _, _, _) => {
-                    let jump_target_index = addr.ir_index as usize;
-                    is_head.set(jump_target_index, true);
-                    if i + 1 < is_head.len() {
-                        is_head.set(i + 1, true);
-                    }
+            if let IR::Jump(_, addr, _, _, _) = ir.borrow().deref() {
+                let jump_target_index = addr.ir_index as usize;
+                is_head.set(jump_target_index, true);
+                if i + 1 < is_head.len() {
+                    is_head.set(i + 1, true);
                 }
-                _ => {}
             }
         }
         // Generate blocks
@@ -201,17 +197,15 @@ impl From<Vec<IR>> for DataFlowGraph<CodeBlock, CodeBlockGraphWeight> {
         let mut peek_iter = res.weight.irs.iter_mut().enumerate().peekable();
         while let Some((i, ir)) = peek_iter.next() {
             let current_index = assigned_block[i];
-            match ir.borrow_mut().deref_mut() {
-                IR::Quad(_, var, _, _, ref mut info) => {
-                    info.declaration_number = Some(res.weight.assignment_count);
-                    res.weight
-                        .variable_assignment_map
-                        .entry(*var)
-                        .or_default()
-                        .push(info.declaration_number.unwrap());
-                    res.weight.assignment_count += 1
-                }
-                _ => {}
+            // Assign declaration number to assignment statements
+            if let IR::Quad(_, var, _, _, ref mut info) = ir.borrow_mut().deref_mut() {
+                info.declaration_number = Some(res.weight.assignment_count);
+                res.weight
+                    .variable_assignment_map
+                    .entry(*var)
+                    .or_default()
+                    .push(info.declaration_number.unwrap());
+                res.weight.assignment_count += 1
             }
             // Decide fallthrough
             let fallthrough = match ir.borrow_mut().deref_mut() {

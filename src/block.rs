@@ -1,6 +1,5 @@
 use std::fmt::{Display, Formatter};
 
-use petgraph::visit::NodeCount;
 use petgraph::{
     stable_graph::{NodeIndex, StableDiGraph},
     visit::Bfs,
@@ -186,7 +185,7 @@ impl<BlockType: Block + Display, Weight: Display> Display for DataFlowGraph<Bloc
         });
         writeln!(f, "Edges:").expect("");
         self.graph.node_indices().for_each(|n| {
-            let _ = self.graph.neighbors_directed(n, Outgoing).for_each(|m| {
+            self.graph.neighbors_directed(n, Outgoing).for_each(|m| {
                 writeln!(f, "{:} -> {:}", n.index(), m.index()).expect("");
             });
         });
