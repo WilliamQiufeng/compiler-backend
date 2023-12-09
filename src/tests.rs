@@ -8,7 +8,7 @@ use crate::ir::{
     AddressMarker, CodeBlock, CodeBlockGraphWeight, IRInformation, QuadType, Value,
 };
 use crate::reach_lattice::ReachLattice;
-use crate::semilattice::SemiLattice;
+use crate::semilattice::{SemiLattice, SemiLatticeOrd};
 
 mod u32_lattice;
 #[test]
@@ -16,30 +16,30 @@ fn it_works() {
     let x = u32_lattice::U32SemiLattice::from(0b101101u32);
     let y = u32_lattice::U32SemiLattice::from(0b110011u32);
     let res = x.meet(&y);
-    assert_eq!(res, 0b111111u32.into());
-    assert_eq!(x.meet(&0.into()), x);
-    assert_eq!(x.meet(&u32::MAX.into()), u32::MAX.into());
-    assert!(x < 0.into())
+    assert_eq!(res, 0b111111u32);
+    assert_eq!(x.meet(&0), x);
+    assert_eq!(x.meet(&u32::MAX), u32::MAX);
+    assert!(x.lte(&0))
 }
 #[test]
 fn graph() {
     let mut graph = DataFlowGraph::<u32_lattice::U32Block>::new(());
     let b1 = graph.graph.add_node(u32_lattice::U32Block::new(
         1.into(),
-        0b10010.into(),
-        0b01101.into(),
+        0b10010,
+        0b01101,
     ));
     let b2 = graph.graph.add_node(u32_lattice::U32Block::new(
         2.into(),
-        0b01110.into(),
-        0b01110.into(),
+        0b01110,
+        0b01110,
     ));
     graph.graph.add_edge(graph.entry, b1, ());
     graph.graph.add_edge(b1, b2, ());
     graph.converge(crate::block::Direction::Forward);
     graph.graph.node_indices().for_each(|i| {
         let node = graph.graph.node_weight(i).unwrap();
-        println!("{}, {}", node.get_in().0, node.get_out().0);
+        println!("{}, {}", node.get_in(), node.get_out());
     });
 }
 #[test]

@@ -1,38 +1,47 @@
+
 pub trait SemiLattice: PartialEq {
     fn meet(&self, other: &Self) -> Self;
 }
 pub trait Lattice: SemiLattice + Ord {
     fn join(&self, other: &Self) -> Self;
 }
-pub trait SemiLatticeLTE {
+pub trait SemiLatticeOrd {
     fn lte(&self, other: &Self) -> bool;
+    fn lt(&self, other: &Self) -> bool;
 }
 
-#[derive(Debug)]
-pub struct SemiLatticeWrapper<T: SemiLattice>(pub T);
-impl<T: SemiLattice> SemiLattice for SemiLatticeWrapper<T> {
-    fn meet(&self, other: &Self) -> Self {
-        Self(self.0.meet(&other.0))
+impl<T: SemiLattice + PartialEq> SemiLatticeOrd for T {
+    fn lte(&self, other: &Self) -> bool {
+        self.meet(other) == *self
+    }
+
+    fn lt(&self, other: &Self) -> bool {
+        self.lte(other) && self != other
     }
 }
-impl<T: SemiLattice> PartialEq for SemiLatticeWrapper<T> {
+
+pub trait ProductLattice<SubLattice: SemiLattice, Ix = usize> : SemiLattice {
+    fn get(&self, index: Ix) -> Option<&SubLattice>;
+}
+
+pub struct VecProductLattice<SubLattice: SemiLattice> {
+    storage: Vec<SubLattice>
+}
+
+impl<SubLattice: SemiLattice> PartialEq for VecProductLattice<SubLattice> {
     fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
+        self.storage == other.storage
     }
 }
-impl<T: SemiLattice> PartialOrd for SemiLatticeWrapper<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self.0.meet(&other.0) == self.0 {
-            Some(std::cmp::Ordering::Less)
-        } else if self.0 == other.0 {
-            Some(std::cmp::Ordering::Equal)
-        } else {
-            None
+impl<SubLattice: SemiLattice> SemiLattice for VecProductLattice<SubLattice> {
+    fn meet(&self, other: &Self) -> Self {
+        Self {
+            storage: self.storage.iter().zip(other.storage.iter()).map(|(a, b)| a.meet(b)).collect()
         }
     }
 }
-impl<T: SemiLattice> From<T> for SemiLatticeWrapper<T> {
-    fn from(t: T) -> Self {
-        Self(t)
+impl<SubLattice: SemiLattice> ProductLattice<SubLattice, usize> for VecProductLattice<SubLattice> {
+    fn get(&self, index: usize) -> Option<&SubLattice> {
+        self.storage.get(index)
     }
 }

@@ -36,6 +36,9 @@ pub trait BlockUpdate<T: SemiLattice> {
 pub trait BlockTransfer<SemiLatticeType: SemiLattice, BlockType: Block, GraphWeight>:
     Block
 {
+    /// The `transfer_forward` function is a method defined in the `BlockTransfer` trait. It is used to
+    /// compute the output value of a block given its input value and the current state of the data flow
+    /// graph.
     fn transfer_forward(
         &self,
         in_value: &SemiLatticeType,
@@ -97,6 +100,14 @@ where
     SemiLatticeType: SemiLattice,
     BlockType: FullBlock<SemiLatticeType, BlockType, Weight>,
 {
+    /// The `initialize` function initializes the graph by setting the `out` or `in` values of each node
+    /// based on the given direction.
+    /// 
+    /// Arguments:
+    /// 
+    /// * `direction`: The `direction` parameter is an enum called `Direction`. It can have two possible
+    /// values: `Forward` or `Backward`. This parameter determines the direction in which the update
+    /// operation will be performed.
     fn initialize(&mut self, direction: Direction) {
         let mut bfs = Bfs::new(&self.graph, self.entry);
         match direction {
@@ -124,6 +135,18 @@ where
         }
     }
 
+    /// The `update` function performs a breadth-first search on a graph and updates the input and
+    /// output values of each node based on the given direction.
+    /// 
+    /// Arguments:
+    /// 
+    /// * `direction`: The `direction` parameter is an enum called `Direction`. It can have two possible
+    /// values: `Forward` or `Backward`. This parameter determines the direction in which the update
+    /// operation will be performed.
+    /// 
+    /// Returns:
+    /// 
+    /// a boolean value indicating whether any changes were made during the update process.
     fn update(&mut self, direction: Direction) -> bool {
         let mut bfs = Bfs::new(&self.graph, self.entry);
         let mut changed = false;
@@ -162,6 +185,13 @@ where
         changed
     }
 
+    /// The `converge` function iteratively updates the state of an object until no further changes
+    /// occur.
+    /// 
+    /// Arguments:
+    /// 
+    /// * `direction`: The `direction` parameter is of type `Direction`. It is used to specify the
+    /// direction in which the update operation should be performed.
     fn converge(&mut self, direction: Direction) {
         self.initialize(direction);
         let mut changed = true;

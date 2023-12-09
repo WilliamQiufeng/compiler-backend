@@ -5,13 +5,20 @@ use fixedbitset::FixedBitSet;
 
 use crate::block::DataFlowGraph;
 use crate::ir::{CodeBlockGraphWeight, IR};
+use crate::semilattice::ProductLattice;
 use crate::{
     block::{BlockLattice, BlockTransfer},
     ir::CodeBlock,
     semilattice::SemiLattice,
 };
 
-#[derive(Debug)]
+impl SemiLattice for bool {
+    fn meet(&self, other: &Self) -> Self {
+        *self || *other
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub struct ReachLattice {
     pub value: FixedBitSet,
 }
@@ -68,12 +75,6 @@ impl ReachLattice {
     }
 }
 
-impl PartialEq for ReachLattice {
-    fn eq(&self, other: &Self) -> bool {
-        self.value == other.value
-    }
-}
-
 impl Display for ReachLattice {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.value)
@@ -90,6 +91,15 @@ impl SemiLattice for ReachLattice {
         let mut res_value = self.value.clone();
         res_value.union_with(&other.value);
         Self { value: res_value }
+    }
+}
+impl ProductLattice<bool> for ReachLattice {
+    fn get(&self, index: usize) -> Option<&bool> {
+        if index >= self.value.len() {
+            None
+        } else {
+            Some(&self.value[index])
+        }
     }
 }
 

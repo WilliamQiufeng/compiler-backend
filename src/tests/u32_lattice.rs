@@ -8,8 +8,6 @@ use crate::block::Block;
 
 use crate::block::BlockLattice;
 
-use crate::semilattice::SemiLatticeWrapper;
-
 use crate::semilattice::SemiLattice;
 
 impl SemiLattice for u32 {
@@ -18,7 +16,7 @@ impl SemiLattice for u32 {
     }
 }
 
-pub(crate) type U32SemiLattice = SemiLatticeWrapper<u32>;
+pub(crate) type U32SemiLattice = u32;
 
 pub(crate) struct U32Block {
     pub(crate) block_number: NodeIndex,
@@ -60,11 +58,11 @@ impl BlockLattice<U32SemiLattice> for U32Block {
 
 impl Block for U32Block {
     fn entry() -> Self {
-        Self::new(0.into(), 0.into(), 0.into())
+        Self::new(0.into(), 0, 0)
     }
 
     fn exit() -> Self {
-        Self::new(u32::MAX.into(), 0u32.into(), 0u32.into())
+        Self::new(u32::MAX.into(), 0u32, 0u32)
     }
 
     fn set_node_index(&mut self, index: NodeIndex<u32>) {
@@ -79,11 +77,11 @@ impl BlockTransfer<U32SemiLattice, U32Block, ()> for U32Block {
         graph: &crate::block::DataFlowGraph<U32Block>,
         _: petgraph::prelude::NodeIndex<u32>,
     ) -> U32SemiLattice {
-        graph.graph.node_weights().fold(0.into(), |cur, w| {
+        graph.graph.node_weights().fold(0, |cur, w| {
             if w.block_number == self.block_number {
                 cur
             } else {
-                (cur.0 | w.in_value.0).into()
+                cur | w.in_value
             }
         })
     }
@@ -98,18 +96,18 @@ impl BlockTransfer<U32SemiLattice, U32Block, ()> for U32Block {
     }
 
     fn entry_out(_: &DataFlowGraph<U32Block, ()>) -> U32SemiLattice {
-        0.into()
+        0
     }
 
     fn exit_in(_: &DataFlowGraph<U32Block, ()>) -> U32SemiLattice {
-        0.into()
+        0
     }
 
     fn top(_: &DataFlowGraph<U32Block, ()>) -> U32SemiLattice {
-        0.into()
+        0
     }
 
     fn bottom(_: &DataFlowGraph<U32Block, ()>) -> U32SemiLattice {
-        u32::MAX.into()
+        u32::MAX
     }
 }
