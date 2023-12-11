@@ -34,6 +34,10 @@ impl SemiLattice for LiveLattice {
         res_value.union_with(&other.value);
         Self { value: res_value }
     }
+
+    fn meet_with(&mut self, other: &Self) -> bool {
+        todo!()
+    }
 }
 impl BlockLattice<LiveLattice> for CodeBlock {
     fn get_in(&self) -> &LiveLattice {

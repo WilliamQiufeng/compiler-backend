@@ -14,6 +14,10 @@ impl SemiLattice for u32 {
     fn meet(&self, other: &Self) -> Self {
         self | other
     }
+
+    fn meet_with(&mut self, other: &Self) -> bool {
+        todo!()
+    }
 }
 
 pub(crate) type U32SemiLattice = u32;

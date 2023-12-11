@@ -1,7 +1,6 @@
-use fixedbitset::FixedBitSet;
-
 pub trait SemiLattice: PartialEq {
     fn meet(&self, other: &Self) -> Self;
+    fn meet_with(&mut self, other: &Self) -> bool;
 }
 pub trait Lattice: SemiLattice + Ord {
     fn join(&self, other: &Self) -> Self;
@@ -25,47 +24,57 @@ pub trait ProductLattice<SubLattice: SemiLattice, Ix = usize>: SemiLattice {
     fn get(&self, index: Ix) -> Option<&SubLattice>;
 }
 
-pub struct VecProductLattice<SubLattice: SemiLattice> {
+#[derive(Clone)]
+pub struct VecProductLattice<SubLattice: SemiLattice + Clone> {
     storage: Vec<SubLattice>,
 }
 
-impl<SubLattice: SemiLattice> PartialEq for VecProductLattice<SubLattice> {
+impl<SubLattice: SemiLattice + Clone> PartialEq for VecProductLattice<SubLattice> {
     fn eq(&self, other: &Self) -> bool {
         self.storage == other.storage
     }
 }
-impl<SubLattice: SemiLattice> SemiLattice for VecProductLattice<SubLattice> {
+impl<SubLattice: SemiLattice + Clone> SemiLattice for VecProductLattice<SubLattice> {
     fn meet(&self, other: &Self) -> Self {
-        Self {
-            storage: self
-                .storage
-                .iter()
-                .zip(other.storage.iter())
-                .map(|(a, b)| a.meet(b))
-                .collect(),
-        }
+        let mut res = self.clone();
+        res.meet_with(other);
+        res
+    }
+
+    fn meet_with(&mut self, other: &Self) -> bool {
+        self.storage.iter_mut().enumerate().fold(false, |cur, (i, e)| {
+            cur || e.meet_with(other.get(i).unwrap())
+        })
     }
 }
-impl<SubLattice: SemiLattice> ProductLattice<SubLattice, usize> for VecProductLattice<SubLattice> {
+impl<SubLattice: SemiLattice + Clone> ProductLattice<SubLattice, usize> for VecProductLattice<SubLattice> {
     fn get(&self, index: usize) -> Option<&SubLattice> {
         self.storage.get(index)
     }
 }
 
-#[derive(PartialEq)]
-pub enum FlatLattice<T: SemiLattice + PartialEq + Clone> {
+#[derive(PartialEq, Clone)]
+pub enum FlatLattice<T: PartialEq + Clone> {
     Top,
     Bottom,
     Value(T),
 }
 
-impl<T: SemiLattice + PartialEq + Clone> SemiLattice for FlatLattice<T> {
+impl<T: PartialEq + Clone> SemiLattice for FlatLattice<T> {
     fn meet(&self, other: &Self) -> Self {
-        match (self, other) {
-            (FlatLattice::Value(a), FlatLattice::Value(b)) => FlatLattice::Value(a.meet(b)),
-            (FlatLattice::Bottom, _) | (_, FlatLattice::Bottom) => FlatLattice::Bottom,
-            (FlatLattice::Top, FlatLattice::Value(v)) | (FlatLattice::Value(v), FlatLattice::Top) => FlatLattice::Value(v.clone()),
-            (FlatLattice::Top, FlatLattice::Top) => FlatLattice::Top,
-        }
+        let mut copy = self.clone();
+        copy.meet_with(other);
+        copy
+    }
+
+    fn meet_with(&mut self, other: &Self) -> bool {
+        let res = match (&*self, other) {
+            (FlatLattice::Value(ref a), FlatLattice::Value(ref b)) if a == b => return false,
+            (FlatLattice::Bottom, _) | (_, FlatLattice::Top) => return false,
+            (FlatLattice::Top, FlatLattice::Value(b)) => Self::Value(b.clone()),
+            _ => FlatLattice::Bottom
+        };
+        *self = res;
+        true
     }
 }

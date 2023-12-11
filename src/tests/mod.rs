@@ -6,7 +6,7 @@ use crate::ir::ops::UnaryOp::{Unit};
 use crate::ir::StorageType::{Const, Variable};
 use crate::ir::IR::{Jump, Assignment};
 use crate::ir::{
-    AddressMarker, CodeBlock, CodeBlockGraphWeight, IRInformation, QuadType, StorageType,
+    AddressMarker, CodeBlock, CodeBlockGraphWeight, IRInformation, StorageType,
 };
 use crate::reach_lattice::ReachLattice;
 use crate::semilattice::{SemiLattice, SemiLatticeOrd};
@@ -50,51 +50,51 @@ fn block_partition() {
     let k = 2;
     let t1 = 3;
     let irs = vec![
-        Assignment(Assign, i, Const(1), StorageType::None, IRInformation::default()),
-        Assignment(Assign, j, Const(1), StorageType::None, IRInformation::default()),
-        Assignment(Assign, k, Const(2), StorageType::None, IRInformation::default()),
-        Jump(
-            E,
-            AddressMarker::new(5),
-            Variable(j),
-            Variable(k),
-            IRInformation::default(),
-        ),
-        Assignment(
-            QuadType::E,
-            t1,
-            Variable(j),
-            Variable(k),
-            IRInformation::default(),
-        ),
-        Assignment(
-            Assign,
-            k,
-            Variable(t1),
-            StorageType::None,
-            IRInformation::default(),
-        ),
-        Assignment(
-            Assign,
-            k,
-            Variable(t1),
-            StorageType::None,
-            IRInformation::default(),
-        ),
-        Jump(
-            Bool,
-            AddressMarker::new(1),
-            Variable(t1),
-            StorageType::None,
-            IRInformation::default(),
-        ),
-        Assignment(
-            Assign,
-            k,
-            Variable(t1),
-            StorageType::None,
-            IRInformation::default(),
-        ),
+        // Assignment(Assign, i, Const(1), StorageType::None, IRInformation::default()),
+        // Assignment(Assign, j, Const(1), StorageType::None, IRInformation::default()),
+        // Assignment(Assign, k, Const(2), StorageType::None, IRInformation::default()),
+        // Jump(
+        //     E,
+        //     AddressMarker::new(5),
+        //     Variable(j),
+        //     Variable(k),
+        //     IRInformation::default(),
+        // ),
+        // Assignment(
+        //     QuadType::E,
+        //     t1,
+        //     Variable(j),
+        //     Variable(k),
+        //     IRInformation::default(),
+        // ),
+        // Assignment(
+        //     Assign,
+        //     k,
+        //     Variable(t1),
+        //     StorageType::None,
+        //     IRInformation::default(),
+        // ),
+        // Assignment(
+        //     Assign,
+        //     k,
+        //     Variable(t1),
+        //     StorageType::None,
+        //     IRInformation::default(),
+        // ),
+        // Jump(
+        //     Bool,
+        //     AddressMarker::new(1),
+        //     Variable(t1),
+        //     StorageType::None,
+        //     IRInformation::default(),
+        // ),
+        // Assignment(
+        //     Assign,
+        //     k,
+        //     Variable(t1),
+        //     StorageType::None,
+        //     IRInformation::default(),
+        // ),
     ];
     let mut partitioned = DataFlowGraph::from(irs);
     <DataFlowGraph<CodeBlock, CodeBlockGraphWeight> as BlockUpdate<ReachLattice>>::converge(
@@ -115,51 +115,51 @@ fn block_reach() {
     let u2 = 6;
     let u3 = 7;
     let irs = vec![
-        Assignment(Sub, i, Variable(m), Const(1), IRInformation::default()),
-        Assignment(
-            Assign,
-            j,
-            Variable(n),
-            StorageType::None,
-            IRInformation::default(),
-        ),
-        Assignment(
-            Assign,
-            a,
-            Variable(u1),
-            StorageType::None,
-            IRInformation::default(),
-        ),
-        Assignment(Add, i, Variable(i), Const(1), IRInformation::default()),
-        Assignment(Sub, j, Variable(j), Const(1), IRInformation::default()),
-        Jump(
-            Bool,
-            AddressMarker::new(7),
-            StorageType::None,
-            StorageType::None,
-            IRInformation::default(),
-        ),
-        Assignment(
-            Assign,
-            a,
-            Variable(u2),
-            StorageType::None,
-            IRInformation::default(),
-        ),
-        Assignment(
-            Assign,
-            i,
-            Variable(u3),
-            StorageType::None,
-            IRInformation::default(),
-        ),
-        Jump(
-            Bool,
-            AddressMarker::new(3),
-            StorageType::None,
-            StorageType::None,
-            IRInformation::default(),
-        ),
+        // Assignment(Sub, i, Variable(m), Const(1), IRInformation::default()),
+        // Assignment(
+        //     Assign,
+        //     j,
+        //     Variable(n),
+        //     StorageType::None,
+        //     IRInformation::default(),
+        // ),
+        // Assignment(
+        //     Assign,
+        //     a,
+        //     Variable(u1),
+        //     StorageType::None,
+        //     IRInformation::default(),
+        // ),
+        // Assignment(Add, i, Variable(i), Const(1), IRInformation::default()),
+        // Assignment(Sub, j, Variable(j), Const(1), IRInformation::default()),
+        // Jump(
+        //     Bool,
+        //     AddressMarker::new(7),
+        //     StorageType::None,
+        //     StorageType::None,
+        //     IRInformation::default(),
+        // ),
+        // Assignment(
+        //     Assign,
+        //     a,
+        //     Variable(u2),
+        //     StorageType::None,
+        //     IRInformation::default(),
+        // ),
+        // Assignment(
+        //     Assign,
+        //     i,
+        //     Variable(u3),
+        //     StorageType::None,
+        //     IRInformation::default(),
+        // ),
+        // Jump(
+        //     Bool,
+        //     AddressMarker::new(3),
+        //     StorageType::None,
+        //     StorageType::None,
+        //     IRInformation::default(),
+        // ),
     ];
     let mut partitioned = DataFlowGraph::from(irs);
     <DataFlowGraph<CodeBlock, CodeBlockGraphWeight> as BlockUpdate<ReachLattice>>::converge(

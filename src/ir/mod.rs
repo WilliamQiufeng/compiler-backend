@@ -7,6 +7,7 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use petgraph::graph::NodeIndex;
 pub(crate) mod ops;
+mod parser;
 use ops::*;
 
 use crate::block::{Block, DataFlowGraph};

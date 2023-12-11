@@ -16,6 +16,15 @@ impl SemiLattice for bool {
     fn meet(&self, other: &Self) -> Self {
         *self || *other
     }
+
+    fn meet_with(&mut self, other: &Self) -> bool {
+        if *self == *other {
+            false
+        } else {
+            *self = *other;
+            true
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -91,6 +100,15 @@ impl SemiLattice for ReachLattice {
         let mut res_value = self.value.clone();
         res_value.union_with(&other.value);
         Self { value: res_value }
+    }
+
+    fn meet_with(&mut self, other: &Self) -> bool {
+        if self.value == other.value {
+            false
+        } else {
+            self.value.union_with(&other.value);
+            true
+        }
     }
 }
 impl ProductLattice<bool> for ReachLattice {
