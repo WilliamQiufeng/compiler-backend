@@ -34,7 +34,7 @@ impl ReachLattice {
      */
     pub fn gen_var(ir: &IR, code_block_graph_weight: &CodeBlockGraphWeight) -> Self {
         let mut set = FixedBitSet::with_capacity(code_block_graph_weight.assignment_count);
-        if let IR::Quad(_, _, _, _, info) = ir {
+        if let IR::Assignment(_, _, info) = ir {
             if let Some(declaration_number) = info.declaration_number {
                 set.set(declaration_number, true);
             }
@@ -55,7 +55,7 @@ impl ReachLattice {
     pub fn kill_var(ir: &IR, code_block_graph_weight: &CodeBlockGraphWeight) -> Self {
         let mut set = FixedBitSet::with_capacity(code_block_graph_weight.assignment_count);
         match ir {
-            IR::Quad(_, var, _, _, info) => {
+            IR::Assignment(var, _, info) => {
                 code_block_graph_weight
                     .variable_assignment_map
                     .get(var)
@@ -69,7 +69,7 @@ impl ReachLattice {
                     false,
                 );
             }
-            IR::Jump(_, _, _, _, _) => {}
+            IR::Jump(_, _, _) => {}
         }
         Self { value: set }
     }

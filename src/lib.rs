@@ -3,9 +3,7 @@ mod ir;
 mod live_lattice;
 mod reach_lattice;
 mod semilattice;
-fn main() {
-    println!("Hello, world!");
-}
+mod constant_propagation;
 
 #[cfg(test)]
 mod tests;

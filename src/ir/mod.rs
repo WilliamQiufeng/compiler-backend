@@ -1,11 +1,13 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use petgraph::graph::NodeIndex;
+pub(crate) mod ops;
+use ops::*;
 
 use crate::block::{Block, DataFlowGraph};
 use crate::ir::BlockType::Normal;
@@ -37,43 +39,80 @@ impl AddressMarker {
     }
 }
 
+pub trait Value: Debug {
+    fn get_type(&self) -> DataType;
+    fn apply(&self, op: Operation, other: Option<&impl Value>) -> BoxedValue
+    where
+        Self: Sized;
+    fn get_storage_type(&self) -> StorageType;
+}
+type BoxedValue = Box<dyn Value>;
+
+#[derive(Debug)]
+pub struct IntValue {
+    pub value: i64,
+    pub storage_type: StorageType,
+}
+
+impl Value for IntValue {
+    fn get_type(&self) -> DataType {
+        DataType::I64
+    }
+
+    fn apply(&self, op: Operation, other: Option<&impl Value>) -> BoxedValue
+    where
+        Self: Sized,
+    {
+        todo!()
+    }
+
+    fn get_storage_type(&self) -> StorageType {
+        self.storage_type
+    }
+}
+#[derive(Debug)]
+pub struct VoidValue;
+
+impl Value for VoidValue {
+    fn get_type(&self) -> DataType {
+        DataType::I64
+    }
+
+    fn apply(&self, _: Operation, _: Option<&impl Value>) -> BoxedValue
+    where
+        Self: Sized,
+    {
+        unimplemented!("Not supposed to use this value")
+    }
+
+    fn get_storage_type(&self) -> StorageType {
+        StorageType::Const
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
-pub enum Value {
-    Const(i32),
+#[allow(dead_code)]
+pub enum StorageType {
+    Const,
     Variable(u32),
-    None,
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum JumpType {
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum Operation {
+    Binary(BinaryOp, BoxedValue, BoxedValue),
+    Unary(UnaryOp, BoxedValue),
+}
+
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum JumpOperation {
     Unconditional,
-    LT,
-    GT,
-    E,
-    NE,
-    LTE,
-    GTE,
-    Bool,
+    Compare(CompareType, BoxedValue, BoxedValue),
+    Bool(BoxedValue),
     End,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum QuadType {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    LT,
-    GT,
-    E,
-    NE,
-    LTE,
-    GTE,
-    Not,
-    And,
-    Or,
-    Xor,
-    Assign,
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -92,32 +131,35 @@ impl Display for IRInformation {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
+#[allow(dead_code)]
 pub enum IR {
-    Quad(QuadType, Variable, Value, Value, IRInformation),
-    Jump(JumpType, AddressMarker, Value, Value, IRInformation),
+    Assignment(Variable, Operation, IRInformation),
+    Jump(JumpOperation, AddressMarker, IRInformation),
 }
 
 impl Display for IR {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            IR::Quad(quad_type, var, v1, Value::None, _) => {
-                write!(f, "{:?} <- {:?} {:?}", var, quad_type, v1)
+            IR::Assignment(var, op, _) => match op {
+                Operation::Binary(op, v1, v2) => {
+                    write!(f, "{:?} <- {:?} {:?} {:?}", var, v1, op, v2)
+                }
+                Operation::Unary(op, v1) => {
+                    write!(f, "{:?} <- {:?} {:?}", var, op, v1)
+                }
+            },
+            IR::Jump(JumpOperation::Compare(cmp, v1, v2), addr, _) => {
+                write!(f, "if {:?} {:?} {:?} goto {:?}", v1, cmp, v2, addr)
             }
-            IR::Quad(quad_type, var, v1, v2, _) => {
-                write!(f, "{:?} <- {:?} {:?} {:?}", var, v1, quad_type, v2)
+            IR::Jump(JumpOperation::Bool(v1), addr, _) => {
+                write!(f, "if {:?} goto {:?}", v1, addr)
             }
-            IR::Jump(JumpType::End, _, _, _, _) => {
-                write!(f, "End")
-            }
-            IR::Jump(JumpType::Unconditional, addr, _, _, _) => {
+            IR::Jump(JumpOperation::Unconditional, addr, _) => {
                 write!(f, "goto {:?}", addr)
             }
-            IR::Jump(JumpType::Bool, addr, value, _, _) => {
-                write!(f, "if {:?} goto {:?}", value, addr)
-            }
-            IR::Jump(jump_type, addr, v1, v2, _) => {
-                write!(f, "if {:?} {:?} {:?} goto {:?}", v1, jump_type, v2, addr)
+            IR::Jump(JumpOperation::End, _, _) => {
+                write!(f, "End")
             }
         }
     }
@@ -167,7 +209,7 @@ impl From<Vec<IR>> for DataFlowGraph<CodeBlock, CodeBlockGraphWeight> {
         is_head.set(0, true);
         // Mark block head
         for (i, ir) in res.weight.irs.iter().enumerate() {
-            if let IR::Jump(_, addr, _, _, _) = ir.borrow().deref() {
+            if let IR::Jump(_, addr, _) = ir.borrow().deref() {
                 let jump_target_index = addr.ir_index as usize;
                 is_head.set(jump_target_index, true);
                 if i + 1 < is_head.len() {
@@ -198,7 +240,7 @@ impl From<Vec<IR>> for DataFlowGraph<CodeBlock, CodeBlockGraphWeight> {
         while let Some((i, ir)) = peek_iter.next() {
             let current_index = assigned_block[i];
             // Assign declaration number to assignment statements
-            if let IR::Quad(_, var, _, _, ref mut info) = ir.borrow_mut().deref_mut() {
+            if let IR::Assignment(var, _, ref mut info) = ir.borrow_mut().deref_mut() {
                 info.declaration_number = Some(res.weight.assignment_count);
                 res.weight
                     .variable_assignment_map
@@ -210,15 +252,15 @@ impl From<Vec<IR>> for DataFlowGraph<CodeBlock, CodeBlockGraphWeight> {
             // Decide fallthrough
             let fallthrough = match ir.borrow_mut().deref_mut() {
                 // Jump to another address -> Fallthrough depends on unconditional jump or end
-                IR::Jump(jump_type, ref mut addr, _, _, _) => {
+                IR::Jump(jump_type, ref mut addr, _) => {
                     // Update the desired block id accordingly
                     let mut target_block_index = assigned_block[addr.ir_index as usize];
                     let fallthrough = match jump_type {
-                        JumpType::End => {
+                        JumpOperation::End => {
                             target_block_index = res.exit;
                             false
                         }
-                        JumpType::Unconditional => false,
+                        JumpOperation::Unconditional => false,
                         _ => true,
                     };
                     // Definitely having an edge to the target block

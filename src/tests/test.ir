@@ -1,0 +1,9 @@
+fn @f([i32, 5] @x, {i32, i64} @y) -> void:
+    %entry:
+        %0 = 
+        %1 = add @x @y.0
+        br %1, %ba, %bb
+    %ba:
+        %2 = @x
+
+

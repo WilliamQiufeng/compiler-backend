@@ -1,11 +1,12 @@
 use crate::block::Direction::Forward;
 use crate::block::{BlockLattice, BlockUpdate, DataFlowGraph};
-use crate::ir::JumpType::{Bool, E};
-use crate::ir::QuadType::{Add, Assign, Sub};
-use crate::ir::Value::{Const, Variable};
-use crate::ir::IR::{Jump, Quad};
+use crate::ir::JumpOperation;
+use crate::ir::ops::BinaryOp::{Add, Sub};
+use crate::ir::ops::UnaryOp::{Unit};
+use crate::ir::StorageType::{Const, Variable};
+use crate::ir::IR::{Jump, Assignment};
 use crate::ir::{
-    AddressMarker, CodeBlock, CodeBlockGraphWeight, IRInformation, QuadType, Value,
+    AddressMarker, CodeBlock, CodeBlockGraphWeight, IRInformation, QuadType, StorageType,
 };
 use crate::reach_lattice::ReachLattice;
 use crate::semilattice::{SemiLattice, SemiLatticeOrd};
@@ -49,9 +50,9 @@ fn block_partition() {
     let k = 2;
     let t1 = 3;
     let irs = vec![
-        Quad(Assign, i, Const(1), Value::None, IRInformation::default()),
-        Quad(Assign, j, Const(1), Value::None, IRInformation::default()),
-        Quad(Assign, k, Const(2), Value::None, IRInformation::default()),
+        Assignment(Assign, i, Const(1), StorageType::None, IRInformation::default()),
+        Assignment(Assign, j, Const(1), StorageType::None, IRInformation::default()),
+        Assignment(Assign, k, Const(2), StorageType::None, IRInformation::default()),
         Jump(
             E,
             AddressMarker::new(5),
@@ -59,39 +60,39 @@ fn block_partition() {
             Variable(k),
             IRInformation::default(),
         ),
-        Quad(
+        Assignment(
             QuadType::E,
             t1,
             Variable(j),
             Variable(k),
             IRInformation::default(),
         ),
-        Quad(
+        Assignment(
             Assign,
             k,
             Variable(t1),
-            Value::None,
+            StorageType::None,
             IRInformation::default(),
         ),
-        Quad(
+        Assignment(
             Assign,
             k,
             Variable(t1),
-            Value::None,
+            StorageType::None,
             IRInformation::default(),
         ),
         Jump(
             Bool,
             AddressMarker::new(1),
             Variable(t1),
-            Value::None,
+            StorageType::None,
             IRInformation::default(),
         ),
-        Quad(
+        Assignment(
             Assign,
             k,
             Variable(t1),
-            Value::None,
+            StorageType::None,
             IRInformation::default(),
         ),
     ];
@@ -114,49 +115,49 @@ fn block_reach() {
     let u2 = 6;
     let u3 = 7;
     let irs = vec![
-        Quad(Sub, i, Variable(m), Const(1), IRInformation::default()),
-        Quad(
+        Assignment(Sub, i, Variable(m), Const(1), IRInformation::default()),
+        Assignment(
             Assign,
             j,
             Variable(n),
-            Value::None,
+            StorageType::None,
             IRInformation::default(),
         ),
-        Quad(
+        Assignment(
             Assign,
             a,
             Variable(u1),
-            Value::None,
+            StorageType::None,
             IRInformation::default(),
         ),
-        Quad(Add, i, Variable(i), Const(1), IRInformation::default()),
-        Quad(Sub, j, Variable(j), Const(1), IRInformation::default()),
+        Assignment(Add, i, Variable(i), Const(1), IRInformation::default()),
+        Assignment(Sub, j, Variable(j), Const(1), IRInformation::default()),
         Jump(
             Bool,
             AddressMarker::new(7),
-            Value::None,
-            Value::None,
+            StorageType::None,
+            StorageType::None,
             IRInformation::default(),
         ),
-        Quad(
+        Assignment(
             Assign,
             a,
             Variable(u2),
-            Value::None,
+            StorageType::None,
             IRInformation::default(),
         ),
-        Quad(
+        Assignment(
             Assign,
             i,
             Variable(u3),
-            Value::None,
+            StorageType::None,
             IRInformation::default(),
         ),
         Jump(
             Bool,
             AddressMarker::new(3),
-            Value::None,
-            Value::None,
+            StorageType::None,
+            StorageType::None,
             IRInformation::default(),
         ),
     ];
