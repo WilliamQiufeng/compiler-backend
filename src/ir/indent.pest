@@ -1,0 +1,9 @@
+item = { (!"\n" ~ ANY)* }
+
+lists        = _{ lines ~ EOI }
+lines        = _{ top_first ~ ("\n" ~ top_continue)* }
+top_first    = _{ "- " ~ item ~ ("\n" ~ children)? }
+top_continue = _{ PEEK_ALL ~ "- " ~ item ~ ("\n" ~ children)? }
+
+indentation = _{ (" " | "\t")+ }
+children    =  { PEEK_ALL ~ PUSH(indentation) ~ lines ~ DROP }

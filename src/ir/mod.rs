@@ -10,6 +10,9 @@ pub(crate) mod ops;
 mod parser;
 use ops::*;
 
+#[cfg(test)]
+mod tests;
+
 use crate::block::{Block, DataFlowGraph};
 use crate::ir::BlockType::Normal;
 use crate::reach_lattice::ReachLattice;

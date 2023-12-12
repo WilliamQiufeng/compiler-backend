@@ -1,0 +1,26 @@
+ext fn @g: {[i32, 5], u64} @a -> void
+decl fn @h: {{{{u64}}}} @a -> void
+
+fn @f: [i32, 5] @x, {i32, i64} @y -> void {
+    #entry {
+        %0 = 3
+        %1 = @x + @y.0
+        => #ba
+    }
+    #ba {
+        %2 = @x
+        => %2 ? #ba : #entry
+    }
+    #bb {
+        => ret @x
+    }
+}
+
+impl @h {
+    #entry {
+        @z <- @a
+        => ret
+    }
+}
+
+
