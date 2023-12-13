@@ -1,9 +1,9 @@
 mod block;
 mod ir;
-mod live_lattice;
 mod reach_lattice;
 mod semilattice;
 mod constant_propagation;
+mod util;
 
 #[cfg(test)]
 mod tests;

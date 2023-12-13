@@ -1,14 +1,12 @@
 use crate::block::Direction::Forward;
 use crate::block::{BlockLattice, BlockUpdate, DataFlowGraph};
 use crate::ir::JumpOperation;
+use crate::ir::block::CodeBlockAnalysisNode;
 use crate::ir::ops::BinaryOp::{Add, Sub};
 use crate::ir::ops::UnaryOp::{Unit};
 use crate::ir::StorageType::{Const, Variable};
 use crate::ir::IR::{Jump, Assignment};
-use crate::ir::{
-    AddressMarker, CodeBlock, CodeBlockGraphWeight, IRInformation, StorageType,
-};
-use crate::reach_lattice::ReachLattice;
+use crate::{ir::block::{CodeBlock, CodeBlockGraphWeight}, reach_lattice::ReachLattice};
 use crate::semilattice::{SemiLattice, SemiLatticeOrd};
 
 mod u32_lattice;
@@ -97,7 +95,7 @@ fn block_partition() {
         // ),
     ];
     let mut partitioned = DataFlowGraph::from(irs);
-    <DataFlowGraph<CodeBlock, CodeBlockGraphWeight> as BlockUpdate<ReachLattice>>::converge(
+    <DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight> as BlockUpdate<ReachLattice>>::converge(
         &mut partitioned,
         Forward,
     );
@@ -162,7 +160,7 @@ fn block_reach() {
         // ),
     ];
     let mut partitioned = DataFlowGraph::from(irs);
-    <DataFlowGraph<CodeBlock, CodeBlockGraphWeight> as BlockUpdate<ReachLattice>>::converge(
+    <DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight> as BlockUpdate<ReachLattice>>::converge(
         &mut partitioned,
         Forward,
     );

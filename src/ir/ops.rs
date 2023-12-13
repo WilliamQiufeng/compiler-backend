@@ -1,10 +1,13 @@
 
 #[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq, Hash, Eq)]
 pub enum DataType {
     I64,
     F64,
     Bool,
     Array(Box<DataType>, u32),
+    Void,
+    Struct(Vec<DataType>),
 }
 
 #[derive(Debug, Copy, Clone)]

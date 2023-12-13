@@ -4,13 +4,14 @@ use std::ops::Deref;
 use fixedbitset::FixedBitSet;
 
 use crate::block::DataFlowGraph;
-use crate::ir::{CodeBlockGraphWeight, IR};
+use crate::ir::IR;
+use crate::ir::block::{CodeBlockGraphWeight, CodeBlockAnalysisNode};
 use crate::semilattice::ProductLattice;
 use crate::{
     block::{BlockLattice, BlockTransfer},
-    ir::CodeBlock,
     semilattice::SemiLattice,
 };
+use crate::ir::block::CodeBlock;
 
 impl SemiLattice for bool {
     fn meet(&self, other: &Self) -> Self {
@@ -78,7 +79,7 @@ impl ReachLattice {
                     false,
                 );
             }
-            IR::Jump(_, _, _) => {}
+            IR::Jump(_, _) => {}
         }
         Self { value: set }
     }
@@ -121,7 +122,7 @@ impl ProductLattice<bool> for ReachLattice {
     }
 }
 
-impl BlockLattice<ReachLattice> for CodeBlock {
+impl BlockLattice<ReachLattice> for CodeBlockAnalysisNode {
     fn get_in(&self) -> &ReachLattice {
         &self.reach_in
     }
@@ -139,18 +140,18 @@ impl BlockLattice<ReachLattice> for CodeBlock {
     }
 }
 
-impl BlockTransfer<ReachLattice, CodeBlock, CodeBlockGraphWeight> for CodeBlock {
+impl BlockTransfer<ReachLattice, CodeBlockAnalysisNode, CodeBlockGraphWeight> for CodeBlockAnalysisNode {
     fn transfer_forward(
         &self,
         in_value: &ReachLattice,
-        graph: &DataFlowGraph<CodeBlock, CodeBlockGraphWeight>,
+        graph: &DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight>,
         _: petgraph::prelude::NodeIndex<u32>,
     ) -> ReachLattice {
         let mut current_gen = FixedBitSet::with_capacity(graph.weight.assignment_count);
         let mut current_kill = FixedBitSet::with_capacity(graph.weight.assignment_count);
         let mut current_kill_mask = FixedBitSet::with_capacity(graph.weight.assignment_count);
         current_kill_mask.toggle_range(..);
-        self.irs_range.iter().rev().for_each(|ir| {
+        self.block.borrow().irs_range.iter().rev().for_each(|ir| {
             let ir_kill = ReachLattice::kill_var(ir.borrow().deref(), &graph.weight);
             let mut ir_gen = ReachLattice::gen_var(ir.borrow().deref(), &graph.weight);
             current_kill.union_with(&ir_kill.value);
@@ -169,25 +170,25 @@ impl BlockTransfer<ReachLattice, CodeBlock, CodeBlockGraphWeight> for CodeBlock 
     fn transfer_backward(
         &self,
         _: &ReachLattice,
-        _: &DataFlowGraph<CodeBlock, CodeBlockGraphWeight>,
+        _: &DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight>,
         _: petgraph::prelude::NodeIndex<u32>,
     ) -> ReachLattice {
         todo!()
     }
 
-    fn entry_out(data_flow_graph: &DataFlowGraph<CodeBlock, CodeBlockGraphWeight>) -> ReachLattice {
+    fn entry_out(data_flow_graph: &DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight>) -> ReachLattice {
         Self::top(data_flow_graph)
     }
 
-    fn exit_in(_: &DataFlowGraph<CodeBlock, CodeBlockGraphWeight>) -> ReachLattice {
+    fn exit_in(_: &DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight>) -> ReachLattice {
         unimplemented!("Invalid data flow")
     }
 
-    fn top(data_flow_graph: &DataFlowGraph<CodeBlock, CodeBlockGraphWeight>) -> ReachLattice {
+    fn top(data_flow_graph: &DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight>) -> ReachLattice {
         ReachLattice::new(data_flow_graph.weight.assignment_count)
     }
 
-    fn bottom(data_flow_graph: &DataFlowGraph<CodeBlock, CodeBlockGraphWeight>) -> ReachLattice {
+    fn bottom(data_flow_graph: &DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight>) -> ReachLattice {
         let mut top: ReachLattice = Self::top(data_flow_graph);
         top.value.toggle_range(..);
         top
