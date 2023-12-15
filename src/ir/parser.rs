@@ -1,135 +1,148 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::ops::Deref;
-use std::rc::{Rc, Weak};
-
-use nom::bytes::complete::tag;
-use nom::character::complete::alpha1;
-use nom::combinator::{map, value};
-use nom::multi::separated_list0;
-use nom::sequence::{delimited, separated_pair};
-use nom::{
-    branch::alt,
-    character::complete::{char, one_of},
-    combinator::{map_res, recognize},
-    multi::{many0, many1},
-    sequence::{preceded, terminated},
-    IResult, Parser,
+use std::{
+    borrow::BorrowMut,
+    collections::{HashMap, VecDeque},
+    error::Error,
+    fmt::Display,
+    fs::File,
+    iter::Peekable,
+    ops::{Deref, DerefMut},
 };
 
-use crate::util::{FromInner, Ref};
+use thiserror::Error;
 
-use super::ops::DataType;
-use super::{IntValue, Operation, Scope, Space, SpaceRef, Value, VoidValue, WeakSpaceRef};
+use crate::{util::{FromInner, Ref}, ir::{SpaceContextRef, SpaceContext}};
 
-type ScopeContextRef = Ref<ScopeContext>;
+use super::{
+    lexer::{Token, TokenKind},
+    Scope, ScopeContextRef, SpaceRef, WeakSpaceRef,
+};
 
-struct ScopeContext {
-    pub scope: Scope,
-    pub spaces: HashMap<String, SpaceRef>,
-    global_scope: WeakSpaceRef,
+pub struct Parser<T: Iterator<Item = Token>> {
+    pub token_iter: Peekable<T>,
+    preloaded_tokens: VecDeque<Token>,
 }
-struct FunctionContext {
-    pub scope_ctx: ScopeContextRef,
-    pub function_name: String,
-}
-struct Program {}
 
-fn hexadecimal_value(input: &str) -> IResult<&str, i64> {
-    map_res(
-        preceded(
-            alt((tag("h"), tag("H"))),
-            recognize(many1(terminated(
-                one_of("0123456789abcdefABCDEF"),
-                many0(char('_')),
-            ))),
-        ),
-        |out: &str| i64::from_str_radix(&str::replace(out, "_", ""), 16),
-    )
-    .parse(input)
+#[derive(Debug, Error)]
+pub enum ParseErrorKind {
+    #[error("unexpected token: expected {expected:?}, found {found:?}")]
+    UnexpectedToken {
+        expected: Vec<TokenKind>,
+        found: TokenKind,
+    },
+    #[error("out of range: got {got}")]
+    OutOfRange {
+        got: i64,
+    },
+    #[error("not declared: {name}")]
+    NotDeclared {
+        name: String,
+    },
+    #[error("invalid element: {name}.{index}")]
+    InvalidElement {
+        name: String,
+        index: usize,
+    },
 }
-fn decimal_value(input: &str) -> IResult<&str, i64> {
-    map_res(
-        recognize(many1(terminated(one_of("0123456789"), many0(char('_'))))),
-        |out: &str| str::replace(out, "_", "").parse::<i64>(),
-    )
-    .parse(input)
+#[derive(Debug, Error)]
+pub struct ParseError {
+    kind: ParseErrorKind,
+    current_token: Option<Token>,
 }
-fn binary_value(input: &str) -> IResult<&str, i64> {
-    map_res(
-        preceded(
-            alt((tag("b"), tag("B"))),
-            recognize(many1(terminated(one_of("01"), many0(char('_'))))),
-        ),
-        |out: &str| i64::from_str_radix(&str::replace(out, "_", ""), 2),
-    )
-    .parse(input)
-}
-fn bool_value(input: &str) -> IResult<&str, bool> {
-    alt((value(true, tag("true")), value(false, tag("false"))))(input)
-}
-fn void_value(input: &str) -> IResult<&str, VoidValue> {
-    value(VoidValue, tag("void"))(input)
-}
-fn int_const(input: &str) -> IResult<&str, IntValue> {
-    map(
-        alt((hexadecimal_value, decimal_value, binary_value)),
-        |out| IntValue {
-            value: out,
-            storage_type: super::StorageType::Const,
-        },
-    )(input)
-}
-fn space_id(input: &str) -> IResult<&str, &str> {
-    recognize(preceded(alt((char('@'), char('%'))), alpha1))(input)
-}
-fn context_space_id<'a>(
-    scope_ctx: ScopeContextRef,
-) -> impl Fn(&str) -> IResult<&str, SpaceRef> + 'a {
-    move |input: &str| {
-        map(
-            recognize(preceded(alt((char('@'), char('%'))), alpha1)),
-            |name: &str| {
-                scope_ctx
-                    .borrow_mut()
-                    .spaces
-                    .entry(name.to_string())
-                    .or_insert_with(|| {
-                        SpaceRef::from_inner(Space::Normal(
-                            name.to_string(),
-                            None,
-                            scope_ctx.borrow().scope.clone(),
-                        ))
-                    })
-                    .clone()
-            },
-        )(input)
+impl ParseError {
+    pub fn new(kind: ParseErrorKind, current_token: Option<Token>) -> Self {
+        Self {
+            kind,
+            current_token,
+        }
     }
 }
-fn block_id(input: &str) -> IResult<&str, &str> {
-    recognize(preceded(char('#'), alpha1))(input)
+impl Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
 }
-
-pub(super) fn data_type(input: &str) -> IResult<&str, DataType> {
-    alt((
-        value(DataType::I64, tag("i64")),
-        value(DataType::F64, tag("f64")),
-        value(DataType::Bool, tag("bool")),
-        value(DataType::Void, tag("void")),
-        map(
-            delimited(
-                char('['),
-                separated_pair(data_type, char(','), int_const),
-                char(']'),
-            ),
-            |(dt, len)| DataType::Array(Box::new(dt), len.value as u32),
-        ),
-        map(
-            delimited(char('{'), separated_list0(char(','), data_type), char('}')),
-            DataType::Struct,
-        ),
-    ))(input)
-}
-pub(super) fn instruction(input: &str) -> IResult<&str, Operation> {
-    todo!()
+impl<T: Iterator<Item = Token>> Parser<T> {
+    pub fn new(tokens: T) -> Self {
+        Parser {
+            token_iter: tokens.peekable(),
+            preloaded_tokens: VecDeque::new(),
+        }
+    }
+    fn peek(&mut self) -> Option<&Token> {
+        self.preloaded_tokens
+            .back()
+            .or_else(|| self.token_iter.peek())
+    }
+    fn consume(&mut self) -> Option<Token> {
+        self.preloaded_tokens
+            .pop_back()
+            .or_else(|| self.token_iter.next())
+    }
+    fn match_one_of(&mut self, expected: Vec<TokenKind>) -> Result<Token, ParseError> {
+        if let Some(Token { kind, .. }) = self.peek() {
+            if expected.contains(kind) {
+                Ok(self.consume().unwrap())
+            } else {
+                Err(ParseError::new(
+                    ParseErrorKind::UnexpectedToken {
+                        expected,
+                        found: kind.clone(),
+                    },
+                    self.peek().cloned(),
+                ))
+            }
+        } else {
+            Err(ParseError::new(
+                ParseErrorKind::UnexpectedToken {
+                    expected,
+                    found: TokenKind::Eof,
+                },
+                None,
+            ))
+        }
+    }
+    fn match_token(&mut self, expect: TokenKind) -> Result<Token, ParseError> {
+        if let Some(Token { kind, .. }) = self.peek() {
+            if *kind == expect {
+                Ok(self.consume().unwrap())
+            } else {
+                Err(ParseError::new(
+                    ParseErrorKind::UnexpectedToken {
+                        expected: vec![expect],
+                        found: kind.clone(),
+                    },
+                    self.peek().cloned(),
+                ))
+            }
+        } else {
+            Err(ParseError::new(
+                ParseErrorKind::UnexpectedToken {
+                    expected: vec![expect],
+                    found: TokenKind::Eof,
+                },
+                None,
+            ))
+        }
+    }
+    fn preload_token(&mut self, token: Token) {
+        self.preloaded_tokens.push_back(token);
+    }
+    fn match_space(&mut self, scope: ScopeContextRef) -> Result<SpaceContextRef, ParseError> {
+        let mut cur = self.match_token(TokenKind::SpaceId)?;
+        while self.match_token(TokenKind::Dot).is_ok() {
+            let index_token = self.match_token(TokenKind::IntLiteral)?;
+            let index = match index_token.content.parse::<usize>() {
+                Ok(i) => i,
+                Err(_) => {
+                    return Err(ParseError::new(
+                        ParseErrorKind::OutOfRange {
+                            got: index_token.content.parse().unwrap(),
+                        },
+                        Some(index_token),
+                    ))
+                }
+            };
+        }
+        todo!()
+    }
 }

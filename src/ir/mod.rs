@@ -1,13 +1,23 @@
-use std::{fmt::{Debug, Display, Formatter}, cell::RefCell, rc::{Rc, Weak}, collections::HashMap};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    fmt::{Debug, Display, Formatter},
+    ops::Deref,
+    rc::{Rc, Weak},
+};
 
 use petgraph::graph::NodeIndex;
+mod lexer;
 pub(crate) mod ops;
 mod parser;
 use ops::*;
 
-use crate::{block::DataFlowGraph, util::{Ref, WeakRef}};
+use crate::{
+    block::DataFlowGraph,
+    util::{FromInner, Ref, WeakRef},
+};
 
-use self::block::{CodeBlock, CodeBlockRef, CodeBlockGraphWeight, CodeBlockAnalysisNode};
+use self::block::{CodeBlock, CodeBlockAnalysisNode, CodeBlockGraphWeight, CodeBlockRef};
 pub mod block;
 
 #[cfg(test)]
@@ -17,11 +27,87 @@ type GraphBlockID = NodeIndex<u32>;
 type SpaceRef = Ref<Space>;
 type WeakSpaceRef = WeakRef<Space>;
 type AddressMarkerRef = Ref<AddressMarker>;
+pub type ScopeRef = Ref<Scope>;
+
+type ScopeContextRef = Ref<ScopeContext>;
+
+#[derive(Debug, Clone)]
+struct ScopeContext {
+    pub scope: ScopeRef,
+    pub spaces: HashMap<String, SpaceContextRef>,
+    global_scope: WeakSpaceRef,
+}
+pub type SpaceContextRef = Ref<SpaceContext>;
+
+#[derive(Debug, PartialEq)]
+pub struct SpaceContext {
+    pub space: SpaceRef,
+    pub elements: Vec<SpaceContextRef>,
+}
+impl SpaceContext {
+    pub fn declare(name: String) -> Self {
+        Self {
+            space: SpaceRef::from_inner(Space::Normal(name, None)),
+            elements: vec![],
+        }
+    }
+    pub fn fill_type(&mut self, ty: DataType) {
+        self.elements = match ty {
+            DataType::Array(sub_type, len) => (0..len)
+                .map(|i| {
+                    SpaceContextRef::from_inner(Self::new(SpaceRef::from_inner(Space::Offset(
+                        Box::new(self.space.borrow().clone()),
+                        i,
+                        Some(*sub_type.clone()),
+                    ))))
+                })
+                .collect(),
+            DataType::Struct(s) => s
+                .iter()
+                .enumerate()
+                .map(|(i, sub_type)| {
+                    SpaceContextRef::from_inner(Self::new(SpaceRef::from_inner(Space::Offset(
+                        Box::new(self.space.borrow().clone()),
+                        i,
+                        Some(sub_type.clone()),
+                    ))))
+                })
+                .collect(),
+            _ => vec![],
+        };
+    }
+    pub fn new(space: SpaceRef) -> Self {
+        let mut s = Self {
+            space: space.clone(),
+            elements: vec![],
+        };
+        if let Space::Normal(_, Some(ty)) | Space::Offset(_, _, Some(ty)) = space.borrow().deref() {
+            s.fill_type(ty.clone());
+        }
+        s
+    }
+}
+impl PartialEq for ScopeContext {
+    fn eq(&self, other: &Self) -> bool {
+        self.scope == other.scope && self.spaces == other.spaces
+    }
+}
+impl Eq for ScopeContext {}
+impl Display for ScopeContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.scope.borrow())
+    }
+}
+struct FunctionContext {
+    pub scope_ctx: ScopeContextRef,
+    pub function_name: String,
+    pub function_params: Vec<SpaceRef>,
+}
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub enum Scope {
     Global,
-    Local {fn_name: String},
+    Local { fn_name: String },
 }
 
 impl Display for Scope {
@@ -40,16 +126,16 @@ pub enum BlockType {
     Normal,
 }
 
-#[derive(Debug, Clone, PartialEq, Hash, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Space {
-    Normal(String, Option<DataType>, Scope),
-    Offset(Box<Space>, u32)
+    Normal(String, Option<DataType>),
+    Offset(Box<Space>, usize, Option<DataType>),
 }
 impl Display for Space {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Space::Normal(name, ty, scope) => write!(f, "{}::{}", scope, name),
-            Space::Offset(space, offset) => write!(f, "{}.{}", *space, offset),
+            Space::Normal(name, ty) => write!(f, "{}", name),
+            Space::Offset(space, offset, _) => write!(f, "{}.{}", *space, offset),
         }
     }
 }
@@ -72,7 +158,7 @@ impl AddressMarker {
     pub fn new(ir_index: u32) -> Self {
         Self {
             block_id: None,
-            block_name: "".to_string()
+            block_name: "".to_string(),
         }
     }
 }
@@ -170,7 +256,7 @@ impl Display for IRInformation {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum IR {
-    Assignment(Space, Operation, IRInformation),
+    Assignment(SpaceRef, Operation, IRInformation),
     Jump(JumpOperation, IRInformation),
 }
 
@@ -198,9 +284,9 @@ impl Display for IR {
 struct Function {
     name: String,
     blocks: Vec<CodeBlockRef>,
-    graph: DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight>
+    graph: DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight>,
 }
 struct Program {
     functions: Vec<Function>,
-    globals: HashMap<String, SpaceRef>
+    globals: HashMap<String, SpaceRef>,
 }

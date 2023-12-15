@@ -5,7 +5,7 @@ pub enum DataType {
     I64,
     F64,
     Bool,
-    Array(Box<DataType>, u32),
+    Array(Box<DataType>, usize),
     Void,
     Struct(Vec<DataType>),
 }

@@ -12,46 +12,15 @@ type GraphBlockID = NodeIndex<u32>;
 use crate::block::{Block, DataFlowGraph};
 use crate::reach_lattice::ReachLattice;
 
-use super::{AddressMarker, BlockType, IRInformation, JumpOperation, Space, IR};
+use super::{AddressMarker, BlockType, IRInformation, JumpOperation, Space, IR, SpaceRef};
 
-type IRRef = Rc<RefCell<IR>>;
 pub type CodeBlockRef = Rc<RefCell<CodeBlock>>;
 
-trait IRRefExt {
-    fn default_next() -> Self;
-    fn default_end() -> Self;
-}
 
-impl From<IR> for IRRef {
-    fn from(value: IR) -> Self {
-        Rc::new(RefCell::new(value))
-    }
-}
-
-impl IRRefExt for IRRef {
-    fn default_next() -> Self {
-        Self::from(IR::Jump(
-            JumpOperation::Next,
-            IRInformation {
-                declaration_number: None,
-            },
-        ))
-    }
-
-    fn default_end() -> Self {
-        Self::from(IR::Jump(
-            JumpOperation::End,
-            IRInformation {
-                declaration_number: None,
-            },
-        ))
-    }
-}
 
 pub struct CodeBlockGraphWeight {
     pub assignment_count: usize,
     pub variable_assignment_map: HashMap<Space, Vec<usize>>,
-    pub irs: Vec<IRRef>,
 }
 
 impl CodeBlockGraphWeight {
@@ -59,7 +28,6 @@ impl CodeBlockGraphWeight {
         Self {
             assignment_count: 0,
             variable_assignment_map: HashMap::new(),
-            irs: vec![],
         }
     }
 }
@@ -67,9 +35,6 @@ impl CodeBlockGraphWeight {
 impl Display for CodeBlockGraphWeight {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "IRs:").expect("");
-        for ir in &self.irs {
-            writeln!(f, "{}", ir.borrow().deref()).expect("IR Err");
-        }
         Ok(())
     }
 }
@@ -181,8 +146,8 @@ impl From<Vec<IR>> for DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight
 pub struct CodeBlock {
     pub id: GraphBlockID,
     pub block_type: BlockType,
-    pub irs_range: Vec<IRRef>,
-    pub terminator: IRRef,
+    pub irs_range: Vec<IR>,
+    pub terminator: IR,
 }
 
 pub struct CodeBlockAnalysisNode {
@@ -195,8 +160,8 @@ impl CodeBlock {
     pub fn new(
         id: GraphBlockID,
         block_type: BlockType,
-        irs: Vec<IRRef>,
-        terminator: IRRef,
+        irs: Vec<IR>,
+        terminator: IR,
     ) -> Self {
         Self {
             id,
@@ -209,10 +174,11 @@ impl CodeBlock {
 
 impl Display for CodeBlock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Block {:?}:", self.id.index()).expect("?");
+        writeln!(f, "Block {:?}:", self.id.index())?;
         self.irs_range
             .iter()
-            .for_each(|ir| writeln!(f, "  {}", ir.borrow().deref()).expect(""));
+            .for_each(|ir| writeln!(f, "    {}", ir).expect(""));
+        writeln!(f, "=> {}", self.terminator)?;
         Ok(())
     }
 }
@@ -232,7 +198,12 @@ impl Block for CodeBlockAnalysisNode {
                 id: NodeIndex::default(),
                 block_type: BlockType::Entry,
                 irs_range: vec![],
-                terminator: IRRef::default_next(),
+                terminator: IR::Jump(
+                    JumpOperation::Next,
+                    IRInformation {
+                        declaration_number: None,
+                    },
+                ),
             })),
             reach_in: ReachLattice::new(0),
             reach_out: ReachLattice::new(0),
@@ -245,7 +216,12 @@ impl Block for CodeBlockAnalysisNode {
                 id: NodeIndex::default(),
                 block_type: BlockType::Exit,
                 irs_range: vec![],
-                terminator: IRRef::default_next(),
+                terminator: IR::Jump(
+                    JumpOperation::End,
+                    IRInformation {
+                        declaration_number: None,
+                    },
+                ),
             })),
             reach_in: ReachLattice::new(0),
             reach_out: ReachLattice::new(0),

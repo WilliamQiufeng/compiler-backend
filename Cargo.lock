@@ -200,6 +200,7 @@ dependencies = [
  "pest",
  "pest_derive",
  "petgraph",
+ "thiserror",
 ]
 
 [[package]]

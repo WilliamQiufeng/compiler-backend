@@ -63,25 +63,26 @@ impl ReachLattice {
     All 0s, but killed declaration numbers are 1
      */
     pub fn kill_var(ir: &IR, code_block_graph_weight: &CodeBlockGraphWeight) -> Self {
-        let mut set = FixedBitSet::with_capacity(code_block_graph_weight.assignment_count);
-        match ir {
-            IR::Assignment(var, _, info) => {
-                code_block_graph_weight
-                    .variable_assignment_map
-                    .get(var)
-                    .expect("Variable not found")
-                    .iter()
-                    .for_each(|declaration_number| {
-                        set.set(*declaration_number, true);
-                    });
-                set.set(
-                    info.declaration_number.expect("No declaration number"),
-                    false,
-                );
-            }
-            IR::Jump(_, _) => {}
-        }
-        Self { value: set }
+        // let mut set = FixedBitSet::with_capacity(code_block_graph_weight.assignment_count);
+        // match ir {
+        //     IR::Assignment(var, _, info) => {
+        //         code_block_graph_weight
+        //             .variable_assignment_map
+        //             .get(var)
+        //             .expect("Variable not found")
+        //             .iter()
+        //             .for_each(|declaration_number| {
+        //                 set.set(*declaration_number, true);
+        //             });
+        //         set.set(
+        //             info.declaration_number.expect("No declaration number"),
+        //             false,
+        //         );
+        //     }
+        //     IR::Jump(_, _) => {}
+        // }
+        // Self { value: set }
+        todo!()
     }
 }
 
@@ -152,10 +153,10 @@ impl BlockTransfer<ReachLattice, CodeBlockAnalysisNode, CodeBlockGraphWeight> fo
         let mut current_kill_mask = FixedBitSet::with_capacity(graph.weight.assignment_count);
         current_kill_mask.toggle_range(..);
         self.block.borrow().irs_range.iter().rev().for_each(|ir| {
-            let ir_kill = ReachLattice::kill_var(ir.borrow().deref(), &graph.weight);
-            let mut ir_gen = ReachLattice::gen_var(ir.borrow().deref(), &graph.weight);
+            let ir_kill = ReachLattice::kill_var(ir, &graph.weight);
+            let mut ir_gen = ReachLattice::gen_var(ir, &graph.weight);
             current_kill.union_with(&ir_kill.value);
-            let ir_kill_mask = ReachLattice::kill_mask_var(ir.borrow().deref(), &graph.weight);
+            let ir_kill_mask = ReachLattice::kill_mask_var(ir, &graph.weight);
             current_kill_mask.intersect_with(&ir_kill_mask.value);
             ir_gen.value.intersect_with(&current_kill_mask);
             current_gen.union_with(&ir_gen.value);
