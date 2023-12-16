@@ -2,10 +2,6 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::iter::Peekable;
 use std::ops::RangeBounds;
-use std::{char, num};
-
-use nom::bytes::complete::tag;
-use nom::AsChar;
 
 use crate::util::{FromInner, Ref};
 
@@ -103,7 +99,7 @@ struct Tokenize<Iter: Iterator<Item = char>> {
     current_buffer_length: usize,
     buffer_start_cursor: Cursor,
     buffer_end_cursor: Cursor,
-    finished: bool
+    finished: bool,
 }
 impl<Iter: Iterator<Item = char>> Tokenize<Iter> {
     fn new(iter_source: Peekable<Iter>) -> Self {
@@ -114,7 +110,7 @@ impl<Iter: Iterator<Item = char>> Tokenize<Iter> {
             current_buffer_length: 0,
             buffer_start_cursor: Cursor { line: 0, column: 0 },
             buffer_end_cursor: Cursor { line: 0, column: 0 },
-            finished: false
+            finished: false,
         }
     }
     fn peek_char(&mut self) -> Option<&char> {
