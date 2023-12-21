@@ -6,6 +6,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
+use id_arena::{Arena, Id};
 use petgraph::graph::NodeIndex;
 mod lexer;
 pub(crate) mod ops;
@@ -14,107 +15,33 @@ use ops::*;
 
 use crate::{
     block::DataFlowGraph,
-    util::{FromInner, Ref, WeakRef},
+    util::{FromInner, MonotonicIdGenerator, RcRef, WeakRef, MultiKeyArenaHashMap}, semilattice::FlatLattice,
 };
 
-use self::block::{CodeBlock, CodeBlockAnalysisNode, CodeBlockGraphWeight, CodeBlockRef};
+use self::block::{CodeBlock, CodeBlockAnalysisNode, CodeBlockGraphWeight, CodeBlockId};
 pub mod block;
 
 #[cfg(test)]
 mod tests;
 
 type GraphBlockID = NodeIndex<u32>;
-type SpaceRef = Ref<Space>;
-type WeakSpaceRef = WeakRef<Space>;
-type AddressMarkerRef = Ref<AddressMarker>;
-pub type ScopeRef = Ref<Scope>;
-
-type ScopeContextRef = Ref<ScopeContext>;
-
-#[derive(Debug, Clone)]
-struct ScopeContext {
-    pub scope: ScopeRef,
-    pub spaces: HashMap<String, SpaceContextRef>,
-    global_scope: WeakSpaceRef,
-}
-pub type SpaceContextRef = Ref<SpaceContext>;
-
-#[derive(Debug, PartialEq)]
-pub struct SpaceContext {
-    pub space: SpaceRef,
-    pub elements: Vec<SpaceContextRef>,
-}
-impl SpaceContext {
-    pub fn declare(name: String) -> Self {
-        Self {
-            space: SpaceRef::from_inner(Space::Normal(name, None)),
-            elements: vec![],
-        }
-    }
-    pub fn fill_type(&mut self, ty: DataType) {
-        self.elements = match ty {
-            DataType::Array(sub_type, len) => (0..len)
-                .map(|i| {
-                    SpaceContextRef::from_inner(Self::new(SpaceRef::from_inner(Space::Offset(
-                        Box::new(self.space.borrow().clone()),
-                        i,
-                        Some(*sub_type.clone()),
-                    ))))
-                })
-                .collect(),
-            DataType::Struct(s) => s
-                .iter()
-                .enumerate()
-                .map(|(i, sub_type)| {
-                    SpaceContextRef::from_inner(Self::new(SpaceRef::from_inner(Space::Offset(
-                        Box::new(self.space.borrow().clone()),
-                        i,
-                        Some(sub_type.clone()),
-                    ))))
-                })
-                .collect(),
-            _ => vec![],
-        };
-    }
-    pub fn new(space: SpaceRef) -> Self {
-        let mut s = Self {
-            space: space.clone(),
-            elements: vec![],
-        };
-        if let Space::Normal(_, Some(ty)) | Space::Offset(_, _, Some(ty)) = space.borrow().deref() {
-            s.fill_type(ty.clone());
-        }
-        s
-    }
-}
-impl PartialEq for ScopeContext {
-    fn eq(&self, other: &Self) -> bool {
-        self.scope == other.scope && self.spaces == other.spaces
-    }
-}
-impl Eq for ScopeContext {}
-impl Display for ScopeContext {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.scope.borrow())
-    }
-}
-struct FunctionContext {
-    pub scope_ctx: ScopeContextRef,
-    pub function_name: String,
-    pub function_params: Vec<SpaceRef>,
-}
+type SpaceId = Id<Space>;
+type SpaceNameId = usize;
+type BlockNameId = usize;
+type WeakSpaceRef = WeakRef<SpaceKind>;
+type AddressMarkerRef = RcRef<AddressMarker>;
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub enum Scope {
     Global,
-    Local { fn_name: String },
+    Local { fn_name_id: SpaceNameId },
 }
 
 impl Display for Scope {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Scope::Global => write!(f, "global"),
-            Scope::Local { fn_name } => write!(f, "{}", fn_name),
+            Scope::Local { fn_name_id } => write!(f, "{}", fn_name_id),
         }
     }
 }
@@ -127,71 +54,88 @@ pub enum BlockType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Space {
-    Normal(String, Option<DataType>),
-    Offset(Box<Space>, usize, Option<DataType>),
+pub enum SpaceKind {
+    Normal(Option<DataType>, Vec<SpaceNameId>),
+    Offset(SpaceNameId, usize, Option<DataType>),
 }
-impl Display for Space {
+pub struct Space {
+    pub kind: SpaceKind,
+    pub scope: Scope,
+    pub value: BoxedValue,
+}
+impl Display for SpaceKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Space::Normal(name, ty) => write!(f, "{}", name),
-            Space::Offset(space, offset, _) => write!(f, "{}.{}", *space, offset),
+            SpaceKind::Normal(Some(ty), _) => write!(f, "{}", ty),
+            SpaceKind::Offset(space, offset, _) => write!(f, "{}.{}", space, offset),
+            SpaceKind::Normal(None, _) => write!(f, "Unknown"),
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct AddressMarker {
-    pub block_name: String,
-    pub block_id: Option<GraphBlockID>,
+    pub block_id: GraphBlockID,
 }
 impl Display for AddressMarker {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.block_id {
-            Some(id) => write!(f, "{:?}", id),
-            None => write!(f, "{}", self.block_name),
-        }
+        write!(f, "{}", self.block_id.index())
     }
 }
 
 impl AddressMarker {
-    pub fn new(ir_index: u32) -> Self {
-        Self {
-            block_id: None,
-            block_name: "".to_string(),
-        }
+    pub fn new(block_id: GraphBlockID) -> Self {
+        Self { block_id }
     }
 }
 
 pub trait Value: Debug {
     fn get_type(&self) -> DataType;
-    fn apply(&self, op: Operation, other: Option<&impl Value>) -> BoxedValue
+    fn apply(&mut self, op: Operation, other: Option<&impl Value>)
     where
         Self: Sized;
-    fn get_storage_type(&self) -> StorageType;
+    fn static_cmp(&self, cmp: CompareType, other: Option<&impl Value>) -> bool
+    where
+        Self: Sized;
+}
+pub trait ValueCloneExt<'a>: Value + Clone {
+    fn then(&'a self, op: Operation, other: Option<&impl Value>) -> Box<dyn Value + 'a>
+    where
+        Self: Sized;
+}
+impl<'a, T: 'a + Value + Clone> ValueCloneExt<'a> for T {
+    fn then(&'_ self, op: Operation, other: Option<&impl Value>) -> Box<dyn Value + 'a>
+    where
+        Self: Sized,
+    {
+        let mut clone = self.clone();
+        clone.apply(op, other);
+        Box::new(clone)
+    }
 }
 type BoxedValue = Box<dyn Value>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IntValue {
-    pub value: i64,
-    pub storage_type: StorageType,
+    pub value: FlatLattice<i64>,
 }
 
 impl Value for IntValue {
     fn get_type(&self) -> DataType {
         DataType::I64
     }
-
-    fn apply(&self, op: Operation, other: Option<&impl Value>) -> BoxedValue
+    fn apply(&mut self, op: Operation, other: Option<&impl Value>)
     where
         Self: Sized,
     {
         todo!()
     }
 
-    fn get_storage_type(&self) -> StorageType {
-        self.storage_type
+    fn static_cmp(&self, cmp: CompareType, other: Option<&impl Value>) -> bool
+    where
+        Self: Sized,
+    {
+        todo!()
     }
 }
 #[derive(Debug, Clone)]
@@ -202,23 +146,19 @@ impl Value for VoidValue {
         DataType::I64
     }
 
-    fn apply(&self, _: Operation, _: Option<&impl Value>) -> BoxedValue
+    fn apply(&mut self, op: Operation, other: Option<&impl Value>)
     where
         Self: Sized,
     {
         unimplemented!("Not supposed to use this value")
     }
 
-    fn get_storage_type(&self) -> StorageType {
-        StorageType::Const
+    fn static_cmp(&self, cmp: CompareType, other: Option<&impl Value>) -> bool
+    where
+        Self: Sized,
+    {
+        unimplemented!("Not supposed to use this value")
     }
-}
-
-#[derive(Debug, Copy, Clone)]
-#[allow(dead_code)]
-pub enum StorageType {
-    Const,
-    Variable(u32),
 }
 
 #[derive(Debug)]
@@ -256,7 +196,7 @@ impl Display for IRInformation {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum IR {
-    Assignment(SpaceRef, Operation, IRInformation),
+    Assignment(SpaceId, Operation, IRInformation),
     Jump(JumpOperation, IRInformation),
 }
 
@@ -281,12 +221,25 @@ impl Display for IR {
     }
 }
 
-struct Function {
-    name: String,
-    blocks: Vec<CodeBlockRef>,
-    graph: DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight>,
+pub struct Function {
+    pub name: String,
+    pub params: Vec<SpaceNameId>,
+    pub locals: MultiKeyArenaHashMap<SpaceNameId, Space>,
+    pub local_names: HashMap<String, SpaceNameId>,
+    pub blocks: MultiKeyArenaHashMap<BlockNameId, CodeBlock>,
+    pub block_names: HashMap<String, BlockNameId>,
+    pub graph: DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight>,
+    program: ProgramRef,
 }
-struct Program {
-    functions: Vec<Function>,
-    globals: HashMap<String, SpaceRef>,
+pub type FunctionRef = RcRef<Function>;
+pub struct Program {
+    pub functions: Vec<Function>,
+    pub globals: MultiKeyArenaHashMap<SpaceNameId, Space>,
+    pub global_names: HashMap<String, SpaceNameId>,
+    pub space_arena: RcRef<Arena<Space>>,
+    pub block_arena: RcRef<Arena<CodeBlock>>,
+    pub ir_arena: RcRef<Arena<IR>>,
+    space_id_generator: MonotonicIdGenerator<SpaceNameId>,
+    block_id_generator: MonotonicIdGenerator<BlockNameId>,
 }
+pub type ProgramRef = RcRef<Program>;

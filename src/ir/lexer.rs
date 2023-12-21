@@ -3,10 +3,10 @@ use std::fmt::Display;
 use std::iter::Peekable;
 use std::ops::RangeBounds;
 
-use crate::util::{FromInner, Ref};
+use crate::util::{FromInner, RcRef};
 
 use super::ops::DataType;
-use super::{IntValue, Operation, Scope, Space, SpaceRef, Value, VoidValue, WeakSpaceRef};
+use super::{IntValue, Operation, Scope, SpaceKind, SpaceId, Value, VoidValue, WeakSpaceRef};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum TokenKind {

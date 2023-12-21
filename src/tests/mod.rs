@@ -4,7 +4,6 @@ use crate::ir::JumpOperation;
 use crate::ir::block::CodeBlockAnalysisNode;
 use crate::ir::ops::BinaryOp::{Add, Sub};
 use crate::ir::ops::UnaryOp::{Unit};
-use crate::ir::StorageType::{Const, Variable};
 use crate::ir::IR::{Jump, Assignment};
 use crate::{ir::block::{CodeBlock, CodeBlockGraphWeight}, reach_lattice::ReachLattice};
 use crate::semilattice::{SemiLattice, SemiLatticeOrd};

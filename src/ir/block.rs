@@ -5,6 +5,7 @@ use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
+use id_arena::{Id, DefaultArenaBehavior, ArenaBehavior};
 use petgraph::graph::NodeIndex;
 
 type GraphBlockID = NodeIndex<u32>;
@@ -12,15 +13,15 @@ type GraphBlockID = NodeIndex<u32>;
 use crate::block::{Block, DataFlowGraph};
 use crate::reach_lattice::ReachLattice;
 
-use super::{AddressMarker, BlockType, IRInformation, JumpOperation, Space, IR, SpaceRef};
+use super::{AddressMarker, BlockType, IRInformation, JumpOperation, SpaceKind, IR, SpaceId};
 
-pub type CodeBlockRef = Rc<RefCell<CodeBlock>>;
+pub type CodeBlockId = Id<CodeBlock>;
 
 
 
 pub struct CodeBlockGraphWeight {
     pub assignment_count: usize,
-    pub variable_assignment_map: HashMap<Space, Vec<usize>>,
+    pub variable_assignment_map: HashMap<SpaceKind, Vec<usize>>,
 }
 
 impl CodeBlockGraphWeight {
@@ -151,9 +152,10 @@ pub struct CodeBlock {
 }
 
 pub struct CodeBlockAnalysisNode {
-    pub block: CodeBlockRef,
+    pub block: CodeBlockId,
     pub reach_in: ReachLattice,
     pub reach_out: ReachLattice,
+    pub node_index: NodeIndex
 }
 
 impl CodeBlock {
@@ -184,7 +186,7 @@ impl Display for CodeBlock {
 }
 impl Display for CodeBlockAnalysisNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{}", self.block.borrow())?;
+        writeln!(f, "{}", self.block.index())?;
         
         writeln!(f, "IN = {}, OUT = {}", self.reach_in, self.reach_out)?;
         Ok(())
@@ -194,41 +196,23 @@ impl Display for CodeBlockAnalysisNode {
 impl Block for CodeBlockAnalysisNode {
     fn entry() -> Self {
         Self {
-            block: CodeBlockRef::new(RefCell::new(CodeBlock {
-                id: NodeIndex::default(),
-                block_type: BlockType::Entry,
-                irs_range: vec![],
-                terminator: IR::Jump(
-                    JumpOperation::Next,
-                    IRInformation {
-                        declaration_number: None,
-                    },
-                ),
-            })),
+            block: DefaultArenaBehavior::new_id(0, 0),
             reach_in: ReachLattice::new(0),
             reach_out: ReachLattice::new(0),
+            node_index: NodeIndex::new(0),
         }
     }
 
     fn exit() -> Self {
         Self {
-            block: CodeBlockRef::new(RefCell::new(CodeBlock {
-                id: NodeIndex::default(),
-                block_type: BlockType::Exit,
-                irs_range: vec![],
-                terminator: IR::Jump(
-                    JumpOperation::End,
-                    IRInformation {
-                        declaration_number: None,
-                    },
-                ),
-            })),
+            block: DefaultArenaBehavior::new_id(0, 0),
             reach_in: ReachLattice::new(0),
             reach_out: ReachLattice::new(0),
+            node_index: NodeIndex::new(1),
         }
     }
 
     fn set_node_index(&mut self, index: NodeIndex<u32>) {
-        self.block.borrow_mut().id = index
+        self.node_index = index
     }
 }

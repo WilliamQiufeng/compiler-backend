@@ -53,7 +53,7 @@ impl<SubLattice: SemiLattice + Clone> ProductLattice<SubLattice, usize> for VecP
     }
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum FlatLattice<T: PartialEq + Clone> {
     Top,
     Bottom,

@@ -2,6 +2,7 @@ use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 
 use fixedbitset::FixedBitSet;
+use id_arena::{Arena, DefaultArenaBehavior};
 
 use crate::block::DataFlowGraph;
 use crate::ir::IR;
@@ -152,15 +153,15 @@ impl BlockTransfer<ReachLattice, CodeBlockAnalysisNode, CodeBlockGraphWeight> fo
         let mut current_kill = FixedBitSet::with_capacity(graph.weight.assignment_count);
         let mut current_kill_mask = FixedBitSet::with_capacity(graph.weight.assignment_count);
         current_kill_mask.toggle_range(..);
-        self.block.borrow().irs_range.iter().rev().for_each(|ir| {
-            let ir_kill = ReachLattice::kill_var(ir, &graph.weight);
-            let mut ir_gen = ReachLattice::gen_var(ir, &graph.weight);
-            current_kill.union_with(&ir_kill.value);
-            let ir_kill_mask = ReachLattice::kill_mask_var(ir, &graph.weight);
-            current_kill_mask.intersect_with(&ir_kill_mask.value);
-            ir_gen.value.intersect_with(&current_kill_mask);
-            current_gen.union_with(&ir_gen.value);
-        });
+        // self.block.borrow().irs_range.iter().rev().for_each(|ir| {
+        //     let ir_kill = ReachLattice::kill_var(ir, &graph.weight);
+        //     let mut ir_gen = ReachLattice::gen_var(ir, &graph.weight);
+        //     current_kill.union_with(&ir_kill.value);
+        //     let ir_kill_mask = ReachLattice::kill_mask_var(ir, &graph.weight);
+        //     current_kill_mask.intersect_with(&ir_kill_mask.value);
+        //     ir_gen.value.intersect_with(&current_kill_mask);
+        //     current_gen.union_with(&ir_gen.value);
+        // });
         let mut res_out = in_value.value.clone();
         res_out.intersect_with(&current_kill_mask);
         res_out.union_with(&current_gen);

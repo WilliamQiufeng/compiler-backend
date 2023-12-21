@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq, Hash, Eq)]
@@ -48,4 +50,27 @@ pub enum UnaryOp {
     Not,
     Negative,
     Unit, // no-op
+}
+
+
+impl Display for DataType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DataType::I64 => write!(f, "i64"),
+            DataType::F64 => write!(f, "f64"),
+            DataType::Bool => write!(f, "bool"),
+            DataType::Array(t, n) => write!(f, "[{}; {}]", t, n),
+            DataType::Void => write!(f, "void"),
+            DataType::Struct(fields) => {
+                write!(f, "{{")?;
+                for (i, field) in fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", field)?;
+                }
+                write!(f, "}}")
+            }
+        }
+    }
 }

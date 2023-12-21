@@ -10,11 +10,11 @@ use std::{
 
 use thiserror::Error;
 
-use crate::{util::{FromInner, Ref}, ir::{SpaceContextRef, SpaceContext}};
+use crate::{util::{FromInner, RcRef}};
 
 use super::{
     lexer::{Token, TokenKind},
-    Scope, ScopeContextRef, SpaceRef, WeakSpaceRef,
+    Scope, SpaceId, WeakSpaceRef,
 };
 
 pub struct Parser<T: Iterator<Item = Token>> {
@@ -127,22 +127,22 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     fn preload_token(&mut self, token: Token) {
         self.preloaded_tokens.push_back(token);
     }
-    fn match_space(&mut self, scope: ScopeContextRef) -> Result<SpaceContextRef, ParseError> {
-        let mut cur = self.match_token(TokenKind::SpaceId)?;
-        while self.match_token(TokenKind::Dot).is_ok() {
-            let index_token = self.match_token(TokenKind::IntLiteral)?;
-            let index = match index_token.content.parse::<usize>() {
-                Ok(i) => i,
-                Err(_) => {
-                    return Err(ParseError::new(
-                        ParseErrorKind::OutOfRange {
-                            got: index_token.content.parse().unwrap(),
-                        },
-                        Some(index_token),
-                    ))
-                }
-            };
-        }
-        todo!()
-    }
+    // fn match_space(&mut self, scope: ScopeContextRef) -> Result<SpaceContextRef, ParseError> {
+    //     let mut cur = self.match_token(TokenKind::SpaceId)?;
+    //     while self.match_token(TokenKind::Dot).is_ok() {
+    //         let index_token = self.match_token(TokenKind::IntLiteral)?;
+    //         let index = match index_token.content.parse::<usize>() {
+    //             Ok(i) => i,
+    //             Err(_) => {
+    //                 return Err(ParseError::new(
+    //                     ParseErrorKind::OutOfRange {
+    //                         got: index_token.content.parse().unwrap(),
+    //                     },
+    //                     Some(index_token),
+    //                 ))
+    //             }
+    //         };
+    //     }
+    //     todo!()
+    // }
 }
