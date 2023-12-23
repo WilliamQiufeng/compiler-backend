@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{RefCell, Ref, RefMut},
     collections::HashMap,
     fmt::{Debug, Display, Formatter},
     ops::Deref,
@@ -15,7 +15,8 @@ use ops::*;
 
 use crate::{
     block::DataFlowGraph,
-    util::{FromInner, MonotonicIdGenerator, RcRef, WeakRef, MultiKeyArenaHashMap}, semilattice::FlatLattice,
+    semilattice::{FlatLattice, SemiLattice},
+    util::{FromInner, MonotonicIdGenerator, MultiKeyArenaHashMap, RcRef, WeakRef, RefExt},
 };
 
 use self::block::{CodeBlock, CodeBlockAnalysisNode, CodeBlockGraphWeight, CodeBlockId};
@@ -27,8 +28,10 @@ mod tests;
 type GraphBlockID = NodeIndex<u32>;
 type SpaceId = Id<Space>;
 type SpaceNameId = usize;
+type FunctionNameId = usize;
+type FunctionId = Id<Function>;
 type BlockNameId = usize;
-type WeakSpaceRef = WeakRef<SpaceKind>;
+type WeakSpaceRef = WeakRef<SpaceSignature>;
 type AddressMarkerRef = RcRef<AddressMarker>;
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
@@ -54,125 +57,117 @@ pub enum BlockType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum SpaceKind {
+pub enum SpaceSignature {
     Normal(Option<DataType>, Vec<SpaceNameId>),
-    Offset(SpaceNameId, usize, Option<DataType>),
+    Offset(SpaceNameId, usize, Option<DataType>, Vec<SpaceNameId>),
 }
 pub struct Space {
-    pub kind: SpaceKind,
+    pub signature: SpaceSignature,
     pub scope: Scope,
-    pub value: BoxedValue,
+    pub value: FlatLattice<Value>,
 }
-impl Display for SpaceKind {
+impl Display for SpaceSignature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            SpaceKind::Normal(Some(ty), _) => write!(f, "{}", ty),
-            SpaceKind::Offset(space, offset, _) => write!(f, "{}.{}", space, offset),
-            SpaceKind::Normal(None, _) => write!(f, "Unknown"),
+            SpaceSignature::Normal(Some(ty), _) => write!(f, "{}", ty),
+            SpaceSignature::Offset(space, offset, _, _) => write!(f, "{}.{}", space, offset),
+            SpaceSignature::Normal(None, _) => write!(f, "Unknown"),
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct AddressMarker {
-    pub block_id: GraphBlockID,
+    pub block_id: BlockNameId,
 }
 impl Display for AddressMarker {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.block_id.index())
+        write!(f, "{}", self.block_id)
     }
 }
 
 impl AddressMarker {
-    pub fn new(block_id: GraphBlockID) -> Self {
+    pub fn new(block_id: BlockNameId) -> Self {
         Self { block_id }
     }
 }
 
-pub trait Value: Debug {
+pub trait Literal: Debug {
     fn get_type(&self) -> DataType;
-    fn apply(&mut self, op: Operation, other: Option<&impl Value>)
+    fn binary(&mut self, op: BinaryOp, other: Option<Self>) -> Self
     where
         Self: Sized;
-    fn static_cmp(&self, cmp: CompareType, other: Option<&impl Value>) -> bool
+    fn unary(&mut self, op: UnaryOp, other: Option<Self>) -> Self
     where
         Self: Sized;
-}
-pub trait ValueCloneExt<'a>: Value + Clone {
-    fn then(&'a self, op: Operation, other: Option<&impl Value>) -> Box<dyn Value + 'a>
+    fn static_cmp(&self, cmp: CompareType, other: Option<Self>) -> bool
     where
         Self: Sized;
 }
-impl<'a, T: 'a + Value + Clone> ValueCloneExt<'a> for T {
-    fn then(&'_ self, op: Operation, other: Option<&impl Value>) -> Box<dyn Value + 'a>
-    where
-        Self: Sized,
-    {
-        let mut clone = self.clone();
-        clone.apply(op, other);
-        Box::new(clone)
-    }
+#[derive(Debug, PartialEq, Clone)]
+pub enum Value {
+    Int(IntValue),
+    Void,
 }
-type BoxedValue = Box<dyn Value>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IntValue {
-    pub value: FlatLattice<i64>,
+    pub value: i64,
 }
 
-impl Value for IntValue {
+impl Literal for IntValue {
     fn get_type(&self) -> DataType {
         DataType::I64
     }
-    fn apply(&mut self, op: Operation, other: Option<&impl Value>)
+
+    fn binary(&mut self, op: BinaryOp, other: Option<Self>) -> Self
+    where
+        Self: Sized,
+    {
+        match op {
+            BinaryOp::Add => IntValue {
+                value: self.value + other.unwrap().value,
+            },
+            BinaryOp::Sub => todo!(),
+            BinaryOp::Mul => todo!(),
+            BinaryOp::Div => todo!(),
+            BinaryOp::And => todo!(),
+            BinaryOp::Or => todo!(),
+            BinaryOp::Xor => todo!(),
+        }
+    }
+
+    fn static_cmp(&self, cmp: CompareType, other: Option<Self>) -> bool
     where
         Self: Sized,
     {
         todo!()
     }
 
-    fn static_cmp(&self, cmp: CompareType, other: Option<&impl Value>) -> bool
+    fn unary(&mut self, op: UnaryOp, other: Option<Self>) -> Self
     where
         Self: Sized,
     {
         todo!()
-    }
-}
-#[derive(Debug, Clone)]
-pub struct VoidValue;
-
-impl Value for VoidValue {
-    fn get_type(&self) -> DataType {
-        DataType::I64
-    }
-
-    fn apply(&mut self, op: Operation, other: Option<&impl Value>)
-    where
-        Self: Sized,
-    {
-        unimplemented!("Not supposed to use this value")
-    }
-
-    fn static_cmp(&self, cmp: CompareType, other: Option<&impl Value>) -> bool
-    where
-        Self: Sized,
-    {
-        unimplemented!("Not supposed to use this value")
     }
 }
 
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum Operation {
-    Binary(BinaryOp, BoxedValue, BoxedValue),
-    Unary(UnaryOp, BoxedValue),
+    Binary(BinaryOp, SpaceNameId, SpaceNameId),
+    Unary(UnaryOp, SpaceNameId),
+    Compare(CompareType, SpaceNameId, SpaceNameId),
 }
+
+#[derive(Debug)]
+pub enum CommandOperation {}
 
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum JumpOperation {
     Unconditional(AddressMarker),
-    Branch(BoxedValue, AddressMarker, AddressMarker),
+    Branch(SpaceNameId, AddressMarker, AddressMarker),
     Next,
     End,
 }
@@ -198,6 +193,7 @@ impl Display for IRInformation {
 pub enum IR {
     Assignment(SpaceId, Operation, IRInformation),
     Jump(JumpOperation, IRInformation),
+    Command(CommandOperation, IRInformation),
 }
 
 impl Display for IR {
@@ -210,6 +206,9 @@ impl Display for IR {
                 Operation::Unary(op, v1) => {
                     write!(f, "{:?} <- {:?} {:?}", var, op, v1)
                 }
+                Operation::Compare(cmp, v1, v2) => {
+                    write!(f, "{:?} <- {:?} {:?} {:?}", var, v1, cmp, v2)
+                }
             },
             IR::Jump(JumpOperation::Branch(v, true_br, false_br), info) => {
                 write!(f, "=> {:?} ? {} : {}", v, true_br, false_br)
@@ -217,29 +216,151 @@ impl Display for IR {
             IR::Jump(JumpOperation::Unconditional(m), _) => write!(f, "=> {}", m),
             IR::Jump(JumpOperation::Next, _) => write!(f, "=> next"),
             IR::Jump(JumpOperation::End, _) => write!(f, "=> end"),
+            IR::Command(op, _) => write!(f, "{:?}", op),
         }
     }
 }
 
 pub struct Function {
     pub name: String,
+    pub name_id: FunctionNameId,
     pub params: Vec<SpaceNameId>,
-    pub locals: MultiKeyArenaHashMap<SpaceNameId, Space>,
     pub local_names: HashMap<String, SpaceNameId>,
     pub blocks: MultiKeyArenaHashMap<BlockNameId, CodeBlock>,
     pub block_names: HashMap<String, BlockNameId>,
     pub graph: DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight>,
+    pub declared: bool,
     program: ProgramRef,
 }
+impl Function {
+    pub fn new(program: ProgramRef, name: String, name_id: FunctionNameId) -> Self {
+        Self {
+            name,
+            name_id,
+            params: vec![],
+            local_names: HashMap::new(),
+            blocks: MultiKeyArenaHashMap::new(program.borrow().block_arena.clone()),
+            block_names: HashMap::new(),
+            graph: DataFlowGraph::new(CodeBlockGraphWeight::new()),
+            declared: false,
+            program: program.clone(),
+        }
+    }
+    pub fn lookup_space(&mut self, name_id: SpaceNameId) -> Option<SpaceId> {
+        self.program.borrow().spaces.get_id(&name_id).copied().or_else(|| self.program.borrow().lookup_space(name_id))
+    }
+    pub fn lookup_or_insert_space_name(&mut self, name: String) -> (SpaceNameId, SpaceId) {
+        if let Some(name_id) = self.local_names.get(&name) {
+            (*name_id, self.program.borrow().spaces.get_id(name_id).copied().unwrap())
+        } else if let Some(t) = self.program.borrow_mut().lookup_global_by_name(name.clone()) {
+            t
+        } else {
+            let name_id = self.program.borrow_mut().space_id_generator.generate();
+            self.local_names.insert(name.clone(), name_id);
+            let space = Space {
+                signature: SpaceSignature::Normal(None, vec![]),
+                scope: Scope::Local {
+                    fn_name_id: self.name_id,
+                },
+                value: FlatLattice::Top,
+            };
+            let id = self.program.borrow_mut().spaces.insert(name_id, space);
+            (name_id, id)
+        }
+
+    }
+    pub fn lookup_or_insert_block(&mut self, name: String) -> (BlockNameId, CodeBlockId) {
+        let name_id = *self.block_names.entry(name).or_insert_with(|| {
+            let id = self.program.borrow_mut().block_id_generator.generate();
+            let space = CodeBlock::new(
+                id,
+                BlockType::Normal,
+                vec![],
+                IR::Jump(JumpOperation::Next, IRInformation::default()),
+            );
+            self.blocks.insert(id, space);
+            id
+        });
+        (name_id, self.blocks.get_id(&name_id).copied().unwrap())
+    }
+}
 pub type FunctionRef = RcRef<Function>;
+
 pub struct Program {
-    pub functions: Vec<Function>,
-    pub globals: MultiKeyArenaHashMap<SpaceNameId, Space>,
+    pub functions: MultiKeyArenaHashMap<FunctionNameId, Function>,
+    pub spaces: MultiKeyArenaHashMap<SpaceNameId, Space>,
     pub global_names: HashMap<String, SpaceNameId>,
+    pub function_names: HashMap<String, FunctionNameId>,
     pub space_arena: RcRef<Arena<Space>>,
     pub block_arena: RcRef<Arena<CodeBlock>>,
-    pub ir_arena: RcRef<Arena<IR>>,
+    pub function_arena: RcRef<Arena<Function>>,
     space_id_generator: MonotonicIdGenerator<SpaceNameId>,
     block_id_generator: MonotonicIdGenerator<BlockNameId>,
+    function_id_generator: MonotonicIdGenerator<FunctionNameId>,
+    weak_self: WeakRef<Self>,
 }
 pub type ProgramRef = RcRef<Program>;
+
+impl Program {
+    pub fn new() -> RcRef<Self> {
+        let space_arena = RcRef::from_inner(Arena::new());
+        let block_arena = RcRef::from_inner(Arena::new());
+        let function_arena = RcRef::from_inner(Arena::new());
+
+        Rc::new_cyclic(|weak| {
+            RefCell::new(Self {
+                functions: MultiKeyArenaHashMap::new(function_arena.clone()),
+                spaces: MultiKeyArenaHashMap::new(space_arena.clone()),
+                global_names: HashMap::new(),
+                function_names: HashMap::new(),
+                space_arena,
+                block_arena,
+                function_arena,
+                space_id_generator: MonotonicIdGenerator::new(1),
+                block_id_generator: MonotonicIdGenerator::new(1),
+                function_id_generator: MonotonicIdGenerator::new(1),
+                weak_self: weak.clone(),
+            })
+        })
+    }
+    pub fn lookup_space(&self, name_id: SpaceNameId) -> Option<SpaceId> {
+        self.spaces.get_id(&name_id).copied()
+    }
+    pub fn lookup_global_by_name(&mut self, name: String) -> Option<(SpaceNameId, SpaceId)> {
+        self.global_names.get(&name).map(|name_id| (*name_id, self.spaces.get_id(name_id).copied().unwrap()))
+    }
+    pub fn lookup_or_insert_global(&mut self, name: String) -> (SpaceNameId, SpaceId) {
+        if let Some(name_id) = self.global_names.get(&name) {
+            (*name_id, self.spaces.get_id(name_id).copied().unwrap())
+        } else {
+            let id = self.space_id_generator.generate();
+            let space = Space {
+                signature: SpaceSignature::Normal(None, vec![]),
+                scope: Scope::Global,
+                value: FlatLattice::Top,
+            };
+            (id, self.spaces.insert(id, space))
+        }
+    }
+    pub fn lookup_or_insert_function(&mut self, name: String) -> (FunctionNameId, FunctionId) {
+        if let Some(name_id) = self.function_names.get(&name) {
+            (*name_id, self.functions.get_id(name_id).copied().unwrap())
+        } else {
+            let id = self.function_id_generator.generate();
+            let space = Function::new(self.weak_self.upgrade().unwrap(), name, id);
+            (id, self.functions.insert(id, space))
+        }
+    }
+    pub fn get_space(&self, id: SpaceId) -> Option<Ref<Space>> {
+        self.space_arena.filter_map(|arena| arena.get(id)).ok()
+    }
+    pub fn get_space_mut(&self, id: SpaceId) -> Option<RefMut<Space>> {
+        self.space_arena.filter_map_mut(|arena| arena.get_mut(id)).ok()
+    }
+    pub fn get_function(&self, id: FunctionId) -> Option<Ref<Function>> {
+        self.function_arena.filter_map(|arena| arena.get(id)).ok()
+    }
+    pub fn get_function_mut(&self, id: FunctionId) -> Option<RefMut<Function>> {
+        self.function_arena.filter_map_mut(|arena| arena.get_mut(id)).ok()
+    }
+}

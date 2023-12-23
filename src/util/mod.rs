@@ -17,6 +17,90 @@ impl<T> FromInner<T> for RcRef<T> {
         Rc::new(RefCell::new(value))
     }
 }
+pub(crate) trait RefExt<'b, T> {
+    fn filter_map<U, F>(&'b self, f: F) -> Result<Ref<'b, U>, Ref<'b, T>>
+    where
+        U: ?Sized,
+        F: FnOnce(&T) -> Option<&U>,
+        Self: Sized;
+    fn filter_map_mut<U, F>(&'b self, f: F) -> Result<RefMut<'b, U>, RefMut<'b, T>>
+    where
+        U: ?Sized,
+        F: FnOnce(&mut T) -> Option<&mut U>,
+        Self: std::marker::Sized;
+    fn map<U, F>(&'b self, f: F) -> Ref<'b, U>
+    where
+        U: ?Sized,
+        F: FnOnce(&T) -> &U;
+    fn map_mut<U, F>(&'b self, f: F) -> RefMut<'b, U>
+    where
+        U: ?Sized,
+        F: FnOnce(&mut T) -> &mut U;
+    fn filter_map2<U: Sized, F>(&'b self, f: F) -> Result<U, Ref<'b, T>>
+    where
+        F: FnOnce(&T) -> Option<U>,
+        Self: Sized;
+    fn filter_map_mut2<U: Sized, F>(&'b self, f: F) -> Result<U, RefMut<'b, T>>
+    where
+        F: FnOnce(&mut T) -> Option<U>,
+        Self: Sized;
+}
+impl<'b, T> RefExt<'b, T> for RcRef<T> {
+    fn filter_map<U, F>(&'b self, f: F) -> Result<Ref<'b, U>, Ref<'b, T>>
+    where
+        U: ?Sized,
+        F: FnOnce(&T) -> Option<&U>,
+        Self: std::marker::Sized,
+    {
+        Ref::filter_map(self.borrow(), f)
+    }
+    fn filter_map_mut<U, F>(&'b self, f: F) -> Result<RefMut<'b, U>, RefMut<'b, T>>
+    where
+        U: ?Sized,
+        F: FnOnce(&mut T) -> Option<&mut U>,
+        Self: std::marker::Sized,
+    {
+        RefMut::filter_map(self.borrow_mut(), f)
+    }
+
+    fn map<U, F>(&'b self, f: F) -> Ref<'b, U>
+    where
+        U: ?Sized,
+        F: FnOnce(&T) -> &U,
+    {
+        Ref::map(self.borrow(), f)
+    }
+    fn map_mut<U, F>(&'b self, f: F) -> RefMut<'b, U>
+    where
+        U: ?Sized,
+        F: FnOnce(&mut T) -> &mut U,
+    {
+        RefMut::map(self.borrow_mut(), f)
+    }
+
+    fn filter_map2<U: Sized, F>(&'b self, f: F) -> Result<U, Ref<'b, T>>
+    where
+        F: FnOnce(&T) -> Option<U>,
+        Self: Sized,
+    {
+        let borrowed = self.borrow();
+        match f(&*borrowed) {
+            Some(value) => Ok(value),
+            None => Err(borrowed),
+        }
+    }
+    fn filter_map_mut2<U: Sized, F>(&'b self, f: F) -> Result<U, RefMut<'b, T>>
+    where
+        F: FnOnce(&mut T) -> Option<U>,
+        Self: Sized,
+    {
+        let mut borrowed = self.borrow_mut();
+        match f(&mut *borrowed) {
+            Some(value) => Ok(value),
+            None => Err(borrowed),
+        }
+    }
+}
 
 pub(crate) trait WeakFromInner<T> {
     fn from_inner(value: T) -> WeakRef<T>;
@@ -42,21 +126,19 @@ impl<T: Default> MonotonicIdGenerator<T> {
         }
     }
 }
-impl<T: Default + Clone + Add<Output = T>> MonotonicIdGenerator<T> {
+
+impl<T: Default + Clone + AddAssign> MonotonicIdGenerator<T> {
     /// Increments the `next_id` value by the `increment` value and returns the
     /// updated `next_id`.
     ///
     /// Returns:
     /// Next unique ID
-    fn generate(&mut self) -> T
-    where
-        T: Clone + Add<Output = T>,
-    {
+    pub fn generate(&mut self) -> T {
         let generated_id = self.next_id.clone();
-        self.next_id = self.next_id.clone() + self.increment.clone();
+        self.next_id += self.increment.clone();
         generated_id
     }
-    fn peek_next_id(&mut self) -> T {
+    pub fn peek_next_id(&mut self) -> T {
         self.next_id.clone()
     }
 }
@@ -79,18 +161,20 @@ impl<K: Hash + Eq + Copy, V> MultiKeyArenaHashMap<K, V> {
         self.map.get(key)
     }
     pub fn get(&self, key: &K) -> Option<Ref<V>> {
-        Ref::filter_map(self.arena.borrow(), |arena| {
-            let id = self.map.get(key)?;
-            arena.get(*id)
-        })
-        .ok()
+        self.arena
+            .filter_map(|arena| {
+                let id = self.map.get(key)?;
+                arena.get(*id)
+            })
+            .ok()
     }
     pub fn get_mut(&mut self, key: &K) -> Option<RefMut<V>> {
-        RefMut::filter_map(self.arena.borrow_mut(), |arena| {
-            let id = self.map.get_mut(key)?;
-            arena.get_mut(*id)
-        })
-        .ok()
+        self.arena
+            .filter_map_mut(|arena| {
+                let id = self.map.get_mut(key)?;
+                arena.get_mut(*id)
+            })
+            .ok()
     }
     pub fn insert(&mut self, key: K, value: V) -> Id<V> {
         let id = self.arena.borrow_mut().alloc(value);

@@ -6,12 +6,13 @@ use std::ops::RangeBounds;
 use crate::util::{FromInner, RcRef};
 
 use super::ops::DataType;
-use super::{IntValue, Operation, Scope, SpaceKind, SpaceId, Value, VoidValue, WeakSpaceRef};
+use super::{IntValue, Operation, Scope, SpaceSignature, SpaceId, Literal, WeakSpaceRef};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum TokenKind {
     SpaceId,
     BlockId,
+    FunctionId,
     Dot,
     Colon,
     Comma,
@@ -299,6 +300,10 @@ impl<T: Iterator<Item = char>> Iterator for Tokenize<T> {
             '#' => {
                 while self.match_alnum().is_some() {}
                 self.create_token(TokenKind::BlockId)
+            }
+            '$' => {
+                while self.match_alnum().is_some() {}
+                self.create_token(TokenKind::FunctionId)
             }
             '!' => {
                 if self.match_char('=').is_some() {

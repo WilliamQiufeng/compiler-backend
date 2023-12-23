@@ -38,7 +38,6 @@ pub enum BinaryOp {
     Sub,
     Mul,
     Div,
-    Compare(CompareType),
     And,
     Or,
     Xor,

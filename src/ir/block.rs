@@ -13,7 +13,7 @@ type GraphBlockID = NodeIndex<u32>;
 use crate::block::{Block, DataFlowGraph};
 use crate::reach_lattice::ReachLattice;
 
-use super::{AddressMarker, BlockType, IRInformation, JumpOperation, SpaceKind, IR, SpaceId};
+use super::{AddressMarker, BlockType, IRInformation, JumpOperation, SpaceSignature, IR, SpaceId, BlockNameId};
 
 pub type CodeBlockId = Id<CodeBlock>;
 
@@ -21,7 +21,7 @@ pub type CodeBlockId = Id<CodeBlock>;
 
 pub struct CodeBlockGraphWeight {
     pub assignment_count: usize,
-    pub variable_assignment_map: HashMap<SpaceKind, Vec<usize>>,
+    pub variable_assignment_map: HashMap<SpaceSignature, Vec<usize>>,
 }
 
 impl CodeBlockGraphWeight {
@@ -145,7 +145,7 @@ impl From<Vec<IR>> for DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight
 
 #[derive(Debug)]
 pub struct CodeBlock {
-    pub id: GraphBlockID,
+    pub id: BlockNameId,
     pub block_type: BlockType,
     pub irs_range: Vec<IR>,
     pub terminator: IR,
@@ -160,7 +160,7 @@ pub struct CodeBlockAnalysisNode {
 
 impl CodeBlock {
     pub fn new(
-        id: GraphBlockID,
+        id: BlockNameId,
         block_type: BlockType,
         irs: Vec<IR>,
         terminator: IR,
@@ -176,7 +176,7 @@ impl CodeBlock {
 
 impl Display for CodeBlock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Block {:?}:", self.id.index())?;
+        writeln!(f, "Block {:?}:", self.id)?;
         self.irs_range
             .iter()
             .for_each(|ir| writeln!(f, "    {}", ir).expect(""));
