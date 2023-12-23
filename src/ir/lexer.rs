@@ -1,13 +1,6 @@
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::iter::Peekable;
 use std::ops::RangeBounds;
-
-use crate::util::{FromInner, RcRef};
-
-use super::ops::DataType;
-use super::{IntValue, Operation, Scope, SpaceSignature, SpaceId, Literal, WeakSpaceRef};
-
 #[derive(Debug, PartialEq, Clone)]
 pub enum TokenKind {
     SpaceId,
@@ -17,6 +10,8 @@ pub enum TokenKind {
     Colon,
     Comma,
     Fn,
+    Stub,
+    Impl,
     OpenParen,
     CloseParen,
     OpenBrace,
@@ -93,7 +88,7 @@ impl Display for Token {
     }
 }
 
-struct Tokenize<Iter: Iterator<Item = char>> {
+pub struct Tokenize<Iter: Iterator<Item = char>> {
     iter_source: Peekable<Iter>,
     cursor: Cursor,
     buffer: [char; 256],
@@ -345,7 +340,9 @@ impl<T: Iterator<Item = char>> Iterator for Tokenize<T> {
                 }
             }
             'i' => {
-                if self.match_string("64").is_some() {
+                if self.match_string("mpl").is_some() {
+                    self.create_token(TokenKind::Impl)
+                } else if self.match_string("64").is_some() {
                     self.create_token(TokenKind::I64)
                 } else {
                     self.error_token()
@@ -379,6 +376,13 @@ impl<T: Iterator<Item = char>> Iterator for Tokenize<T> {
                     self.error_token()
                 }
             }
+            's' => {
+                if self.match_string("tub").is_some() {
+                    self.create_token(TokenKind::Stub)
+                } else {
+                    self.error_token()
+                }
+            }
             'v' => {
                 if self.match_string("oid").is_some() {
                     self.create_token(TokenKind::Void)
@@ -395,7 +399,7 @@ impl<T: Iterator<Item = char>> Iterator for Tokenize<T> {
         Some(res)
     }
 }
-trait Tokenizer<T: Iterator<Item = char>> {
+pub trait Tokenizer<T: Iterator<Item = char>> {
     fn tokenize(self) -> Tokenize<T>;
 }
 impl<T: Iterator<Item = char>> Tokenizer<T> for T {

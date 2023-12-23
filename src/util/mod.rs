@@ -110,7 +110,7 @@ impl<T> WeakFromInner<T> for WeakRef<T> {
         Rc::downgrade(&RcRef::from_inner(value))
     }
 }
-pub fn include<T: Clone, U, R>(t: T, f: impl Fn(T, U) -> R) -> impl Fn(U) -> R {
+pub fn include<T: Clone, U, R>(t: T, f: impl FnOnce(T, U) -> R) -> impl FnOnce(U) -> R {
     move |u| f(t.clone(), u)
 }
 

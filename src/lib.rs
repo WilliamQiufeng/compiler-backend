@@ -1,5 +1,5 @@
 mod block;
-mod ir;
+pub mod ir;
 mod reach_lattice;
 mod semilattice;
 mod constant_propagation;
