@@ -16,7 +16,10 @@ use ops::*;
 use crate::{
     block::DataFlowGraph,
     semilattice::{FlatLattice, SemiLattice},
-    util::{FromInner, MonotonicIdGenerator, MultiKeyArenaHashMap, RcRef, RefExt, WeakRef},
+    util::{
+        FromInner, MonotonicIdGenerator, MonotonicNameMap, MonotonicNamedPool,
+        MultiKeyArenaHashMap, RcRef, RefExt, WeakRef,
+    },
 };
 
 use self::block::{CodeBlock, CodeBlockAnalysisNode, CodeBlockGraphWeight, CodeBlockId};
@@ -225,9 +228,8 @@ pub struct Function {
     pub name: String,
     pub name_id: FunctionNameId,
     pub params: Vec<SpaceNameId>,
-    pub local_names: HashMap<String, SpaceNameId>,
-    pub blocks: MultiKeyArenaHashMap<BlockNameId, CodeBlock>,
-    pub block_names: HashMap<String, BlockNameId>,
+    pub locals: MonotonicNameMap<String, SpaceNameId, Space>,
+    pub blocks: MonotonicNameMap<String, BlockNameId, CodeBlock>,
     pub graph: DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight>,
     pub declared: bool,
     program: ProgramRef,
@@ -238,28 +240,20 @@ impl Function {
             name,
             name_id,
             params: vec![],
-            local_names: HashMap::new(),
-            blocks: MultiKeyArenaHashMap::new(program.borrow().block_arena.clone()),
-            block_names: HashMap::new(),
+            locals: program.borrow().space_pool.borrow().create_map(),
+            blocks: program.borrow().block_pool.borrow().create_map(),
             graph: DataFlowGraph::new(CodeBlockGraphWeight::default()),
             declared: false,
             program: program.clone(),
         }
     }
     pub fn lookup_space(&mut self, name_id: SpaceNameId) -> Option<SpaceId> {
-        self.program
-            .borrow()
-            .spaces
-            .get_id(&name_id)
-            .copied()
+        self.locals
+            .get_id_from_name_id(&name_id)
             .or_else(|| self.program.borrow().lookup_space(name_id))
     }
-
-    pub fn generate_space_name_id(&mut self) -> SpaceNameId {
-        self.program.borrow_mut().space_id_generator.generate()
-    }
     pub fn lookup_or_insert_space(&mut self, name: String) -> (SpaceNameId, SpaceId) {
-        if let Some(name_id) = self.local_names.get(&name) {
+        if let Some(name_id) = self.locals.get_name_id(&name) {
             (
                 *name_id,
                 self.program.borrow().lookup_space(*name_id).unwrap(),
@@ -281,77 +275,60 @@ impl Function {
                 fn_name_id: self.name_id,
             },
         );
-        self.local_names.insert(name, name_id);
+        self.locals.bind(name, name_id);
         (name_id, space_id)
     }
     pub fn lookup_or_insert_block(&mut self, name: String) -> (BlockNameId, CodeBlockId) {
-        let name_id = *self.block_names.entry(name).or_insert_with(|| {
-            let id = self.program.borrow_mut().block_id_generator.generate();
-            let space = CodeBlock::new(
-                id,
-                BlockType::Normal,
-                vec![],
-                IR::Jump(JumpOperation::Next, IRInformation::default()),
-            );
-            self.blocks.insert(id, space);
-            id
-        });
-        (name_id, self.blocks.get_id(&name_id).copied().unwrap())
+        self.blocks.get_name_id_and_id(&name).unwrap_or_else(|| {
+            self.blocks.get_or_insert(name, |name_id, id| {
+                CodeBlock::new(
+                    id,
+                    BlockType::Normal,
+                    vec![],
+                    IR::Jump(JumpOperation::Next, IRInformation::default()),
+                )
+            })
+        })
     }
 }
 pub type FunctionRef = RcRef<Function>;
 
 pub struct Program {
-    pub functions: MultiKeyArenaHashMap<FunctionNameId, Function>,
-    pub spaces: MultiKeyArenaHashMap<SpaceNameId, Space>,
-    pub global_names: HashMap<String, SpaceNameId>,
-    pub function_names: HashMap<String, FunctionNameId>,
-    pub space_arena: RcRef<Arena<Space>>,
-    pub block_arena: RcRef<Arena<CodeBlock>>,
-    pub function_arena: RcRef<Arena<Function>>,
-    space_id_generator: MonotonicIdGenerator<SpaceNameId>,
-    block_id_generator: MonotonicIdGenerator<BlockNameId>,
-    function_id_generator: MonotonicIdGenerator<FunctionNameId>,
+    pub space_pool: RcRef<MonotonicNamedPool<String, SpaceNameId, Space>>,
+    pub globals: MonotonicNameMap<String, SpaceNameId, Space>,
+    pub block_pool: RcRef<MonotonicNamedPool<String, BlockNameId, CodeBlock>>,
+    pub function_pool: RcRef<MonotonicNamedPool<String, FunctionNameId, Function>>,
+    pub functions: MonotonicNameMap<String, FunctionNameId, Function>,
     weak_self: WeakRef<Self>,
 }
 pub type ProgramRef = RcRef<Program>;
 
 impl Program {
     pub fn new() -> RcRef<Self> {
-        let space_arena = RcRef::from_inner(Arena::new());
-        let block_arena = RcRef::from_inner(Arena::new());
-        let function_arena = RcRef::from_inner(Arena::new());
+        let space_pool = MonotonicNamedPool::new(1);
+        let block_pool = MonotonicNamedPool::new(1);
+        let function_pool = MonotonicNamedPool::new(1);
 
         Rc::new_cyclic(|weak| {
             RefCell::new(Self {
-                functions: MultiKeyArenaHashMap::new(function_arena.clone()),
-                spaces: MultiKeyArenaHashMap::new(space_arena.clone()),
-                global_names: HashMap::new(),
-                function_names: HashMap::new(),
-                space_arena,
-                block_arena,
-                function_arena,
-                space_id_generator: MonotonicIdGenerator::new(1),
-                block_id_generator: MonotonicIdGenerator::new(1),
-                function_id_generator: MonotonicIdGenerator::new(1),
+                globals: space_pool.clone().borrow().create_map(),
+                functions: function_pool.clone().borrow().create_map(),
+                space_pool,
+                block_pool,
+                function_pool,
                 weak_self: weak.clone(),
             })
         })
     }
     pub fn lookup_space(&self, name_id: SpaceNameId) -> Option<SpaceId> {
-        self.spaces.get_id(&name_id).copied()
+        self.space_pool.borrow().get_id(&name_id).copied()
     }
     pub fn lookup_global_by_name(&self, name: &String) -> Option<(SpaceNameId, SpaceId)> {
-        self.global_names
-            .get(name)
-            .map(|name_id| (*name_id, self.spaces.get_id(name_id).copied().unwrap()))
+        self.globals.get_name_id_and_id(name)
     }
     pub fn lookup_or_insert_global(&mut self, name: &String) -> (SpaceNameId, SpaceId) {
-        if let Some(name_id) = self.global_names.get(name) {
-            (*name_id, self.spaces.get_id(name_id).copied().unwrap())
-        } else {
-            self.declare_global(name.clone(), None)
-        }
+        self.lookup_global_by_name(name)
+            .unwrap_or_else(|| self.declare_global(name.clone(), None))
     }
     pub fn declare_global(
         &mut self,
@@ -359,7 +336,7 @@ impl Program {
         data_type: Option<DataType>,
     ) -> (SpaceNameId, SpaceId) {
         let (name_id, id) = self.declare_space(data_type, Scope::Global);
-        self.global_names.insert(name.clone(), name_id);
+        self.globals.bind(name.clone(), name_id);
         (name_id, id)
     }
     pub fn declare_space(
@@ -367,7 +344,6 @@ impl Program {
         data_type: Option<DataType>,
         scope: Scope,
     ) -> (SpaceNameId, SpaceId) {
-        let name_id = self.space_id_generator.generate();
         let members = match data_type.clone() {
             Some(DataType::Array(elem_ty, len)) => (0..len)
                 .map(|_| {
@@ -386,40 +362,11 @@ impl Program {
             scope,
             value: FlatLattice::Top,
         };
-        (name_id, self.spaces.insert(name_id, space))
+        self.space_pool.borrow_mut().insert(space)
     }
     pub fn lookup_or_insert_function(&mut self, name: String) -> (FunctionNameId, FunctionId) {
-        if let Some(name_id) = self.function_names.get(&name) {
-            (*name_id, self.functions.get_id(name_id).copied().unwrap())
-        } else {
-            let id = self.function_id_generator.generate();
-            self.function_names.insert(name.clone(), id);
-            let space = Function::new(self.weak_self.upgrade().unwrap(), name, id);
-            (id, self.functions.insert(id, space))
-        }
-    }
-    pub fn get_space(&self, id: SpaceId) -> Option<Ref<Space>> {
-        self.space_arena.filter_map(|arena| arena.get(id)).ok()
-    }
-    pub fn get_space_mut(&self, id: SpaceId) -> Option<RefMut<Space>> {
-        self.space_arena
-            .filter_map_mut(|arena| arena.get_mut(id))
-            .ok()
-    }
-    pub fn get_function(&self, id: FunctionId) -> Option<Ref<Function>> {
-        self.function_arena.filter_map(|arena| arena.get(id)).ok()
-    }
-    pub fn get_function_mut(&self, id: FunctionId) -> Option<RefMut<Function>> {
-        self.function_arena
-            .filter_map_mut(|arena| arena.get_mut(id))
-            .ok()
-    }
-    pub fn get_block(&self, id: CodeBlockId) -> Option<Ref<CodeBlock>> {
-        self.block_arena.filter_map(|arena| arena.get(id)).ok()
-    }
-    pub fn get_block_mut(&self, id: CodeBlockId) -> Option<RefMut<CodeBlock>> {
-        self.block_arena
-            .filter_map_mut(|arena| arena.get_mut(id))
-            .ok()
+        self.functions.get_or_insert(name.clone(), |name_id, id| {
+            Function::new(self.weak_self.upgrade().unwrap(), name, name_id)
+        })
     }
 }

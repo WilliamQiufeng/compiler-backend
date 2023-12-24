@@ -138,7 +138,7 @@ impl From<Vec<IR>> for DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight
 
 #[derive(Debug)]
 pub struct CodeBlock {
-    pub id: BlockNameId,
+    pub id: CodeBlockId,
     pub block_type: BlockType,
     pub irs_range: Vec<IR>,
     pub terminator: IR,
@@ -153,7 +153,7 @@ pub struct CodeBlockAnalysisNode {
 
 impl CodeBlock {
     pub fn new(
-        id: BlockNameId,
+        id: CodeBlockId,
         block_type: BlockType,
         irs: Vec<IR>,
         terminator: IR,

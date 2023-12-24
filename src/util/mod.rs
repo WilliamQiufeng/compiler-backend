@@ -1,6 +1,6 @@
 use std::{
     cell::{Ref, RefCell, RefMut},
-    collections::HashMap,
+    collections::{HashMap, hash_map::Entry},
     hash::Hash,
     marker::PhantomData,
     ops::{Add, AddAssign, Deref, DerefMut},
@@ -259,6 +259,10 @@ impl<NameType: Eq + Hash, NameIdType: Default + Copy + AddAssign + Eq + Hash, Va
     pub fn get_mut_from_id(&mut self, id: Id<ValueType>) -> Option<RefMut<ValueType>> {
         self.arena.filter_map_mut(|arena| arena.get_mut(id)).ok()
     }
+    pub fn insert(&mut self, value: ValueType) -> (NameIdType, Id<ValueType>) {
+        let name_id = self.id_gen.generate();
+        (name_id, self.map.insert(name_id, value))
+    }
 }
 pub struct MonotonicNameMap<
     NameType: Eq + Hash,
@@ -283,6 +287,12 @@ impl<NameType: Eq + Hash, NameIdType: Default + Copy + AddAssign + Eq + Hash, Va
     pub fn get_name_id(&self, name: &NameType) -> Option<&NameIdType> {
         self.name_map.get(name)
     }
+    pub fn get_name_id_and_id(&self, name: &NameType) -> Option<(NameIdType, Id<ValueType>)> {
+        self.name_map.get(name).map(|name_id| (*name_id, self.get_id(name).unwrap()))
+    }
+    pub fn get_id_from_name_id(&self, name_id: &NameIdType) -> Option<Id<ValueType>> {
+        self.pool.borrow().get_id(name_id).cloned()
+    }
     pub fn get_id(&self, name: &NameType) -> Option<Id<ValueType>> {
         self.pool.borrow().get_id(self.get_name_id(name)?).cloned()
     }
@@ -303,10 +313,32 @@ impl<NameType: Eq + Hash, NameIdType: Default + Copy + AddAssign + Eq + Hash, Va
             Some(name_id) => (*name_id, self.get_id(&name).unwrap()),
             None => {
                 let name_id = self.pool.borrow_mut().id_gen.generate();
-                self.name_map.insert(name, name_id);
-                (name_id, self.arena.borrow_mut().alloc(value))
+                self.bind(name, name_id);
+                let id = self.arena.borrow().next_id();
+                self.arena.borrow_mut().alloc(value);
+                (name_id, id)
             },
         }
+    }
+    pub fn get_or_insert<F>(&mut self, name: NameType, initializer: F) -> (NameIdType, Id<ValueType>) 
+        where F : FnOnce(NameIdType, Id<ValueType>) -> ValueType {
+        match self.get_name_id(&name) {
+            Some(name_id) => (*name_id, self.get_id(&name).unwrap()),
+            None => {
+                let name_id = self.pool.borrow_mut().id_gen.generate();
+                self.bind(name, name_id);
+                let id = self.arena.borrow().next_id();
+                let value = initializer(name_id, id);
+                self.arena.borrow_mut().alloc(value);
+                (name_id, id)
+            },
+        }
+    }
+    pub fn bind(&mut self, name: NameType, id: NameIdType) {
+        self.name_map.insert(name, id);
+    }
+    pub fn entry(&mut self, name: NameType) -> Entry<NameType, NameIdType> {
+        self.name_map.entry(name)
     }
 }
 

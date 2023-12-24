@@ -176,7 +176,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
             let index_token = index_token.clone();
             self.program
                 .borrow()
-                .get_space(id)
+                .space_pool.borrow_mut().get_mut_from_id(id)
                 .map(|space| {
                     let fields = match space.signature {
                         crate::ir::SpaceSignature::Normal(_, ref fields) => fields,
@@ -251,8 +251,8 @@ impl<T: Iterator<Item = Token>> Parser<T> {
 
         self.program
             .clone()
-            .borrow()
-            .get_function_mut(fn_id)
+            .borrow_mut()
+            .functions.get_mut_from_id(fn_id)
             .map(|mut function| {
                 if function.declared {
                     Err(ParseError::new(
@@ -276,7 +276,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     fn match_block(&mut self, function: &mut Function) -> Result<(), ParseError> {
         let block_id_token = self.match_token(TokenKind::BlockId)?;
         let (_, block_id) = function.lookup_or_insert_block(block_id_token.content.clone());
-        self.program.borrow().get_block_mut(block_id);
+        self.program.borrow().block_pool.borrow().get_from_id(block_id);
         todo!()
     }
     fn match_fn_body(&mut self, function: &mut Function) -> Result<(), ParseError> {
@@ -307,8 +307,8 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         if match_body {
             self.program
                 .clone()
-                .borrow()
-                .get_function_mut(fn_id)
+                .borrow_mut()
+                .functions.get_mut_from_id(fn_id)
                 .map(|mut function| self.match_fn_body(&mut function))
                 .expect("Function is not declared unexpectedly")?;
         }
