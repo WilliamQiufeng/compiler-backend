@@ -2,6 +2,7 @@ use std::{
     cell::{Ref, RefCell, RefMut},
     collections::HashMap,
     hash::Hash,
+    marker::PhantomData,
     ops::{Add, AddAssign, Deref, DerefMut},
     rc::{Rc, Weak},
 };
@@ -161,20 +162,16 @@ impl<K: Hash + Eq + Copy, V> MultiKeyArenaHashMap<K, V> {
         self.map.get(key)
     }
     pub fn get(&self, key: &K) -> Option<Ref<V>> {
-        self.arena
-            .filter_map(|arena| {
-                let id = self.map.get(key)?;
-                arena.get(*id)
-            })
-            .ok()
+        self.get_from_id(*self.get_id(key)?)
     }
     pub fn get_mut(&mut self, key: &K) -> Option<RefMut<V>> {
-        self.arena
-            .filter_map_mut(|arena| {
-                let id = self.map.get_mut(key)?;
-                arena.get_mut(*id)
-            })
-            .ok()
+        self.get_mut_from_id(*self.get_id(key)?)
+    }
+    pub fn get_from_id(&self, id: Id<V>) -> Option<Ref<V>> {
+        self.arena.filter_map(|arena| arena.get(id)).ok()
+    }
+    pub fn get_mut_from_id(&mut self, id: Id<V>) -> Option<RefMut<V>> {
+        self.arena.filter_map_mut(|arena| arena.get_mut(id)).ok()
     }
     pub fn insert(&mut self, key: K, value: V) -> Id<V> {
         let id = self.arena.borrow_mut().alloc(value);
@@ -220,6 +217,96 @@ impl<K: Hash + Eq + Copy, V> MultiKeyArenaHashMap<K, V> {
                 RefMut::map(self.arena.borrow_mut(), |x| x.get_mut(*v).unwrap()),
             )
         })
+    }
+}
+
+pub struct MonotonicNamedPool<
+    NameType: Eq + Hash,
+    NameIdType: Default + Copy + AddAssign + Eq + Hash,
+    ValueType,
+> {
+    arena: RcRef<Arena<ValueType>>,
+    map: MultiKeyArenaHashMap<NameIdType, ValueType>,
+    id_gen: MonotonicIdGenerator<NameIdType>,
+    weak_self: WeakRef<Self>,
+    _phantom: PhantomData<NameType>,
+}
+
+impl<NameType: Eq + Hash, NameIdType: Default + Copy + AddAssign + Eq + Hash, ValueType>
+    MonotonicNamedPool<NameType, NameIdType, ValueType>
+{
+    pub fn new(name_id_increment: NameIdType) -> RcRef<Self> {
+        RcRef::new_cyclic(|weak_self| {
+            let arena_ref = RcRef::from_inner(Arena::new());
+            RefCell::new(Self {
+                arena: arena_ref.clone(),
+                id_gen: MonotonicIdGenerator::new(name_id_increment),
+                weak_self: weak_self.clone(),
+                map: MultiKeyArenaHashMap::new(arena_ref),
+                _phantom: PhantomData,
+            })
+        })
+    }
+    pub fn create_map(&self) -> MonotonicNameMap<NameType, NameIdType, ValueType> {
+        MonotonicNameMap::new(self.weak_self.upgrade().unwrap())
+    }
+    pub fn get_id(&self, name: &NameIdType) -> Option<&Id<ValueType>> {
+        self.map.get_id(name)
+    }
+    pub fn get_from_id(&self, id: Id<ValueType>) -> Option<Ref<ValueType>> {
+        self.arena.filter_map(|arena| arena.get(id)).ok()
+    }
+    pub fn get_mut_from_id(&mut self, id: Id<ValueType>) -> Option<RefMut<ValueType>> {
+        self.arena.filter_map_mut(|arena| arena.get_mut(id)).ok()
+    }
+}
+pub struct MonotonicNameMap<
+    NameType: Eq + Hash,
+    NameIdType: Default + Copy + AddAssign + Eq + Hash,
+    ValueType,
+> {
+    name_map: HashMap<NameType, NameIdType>,
+    pool: RcRef<MonotonicNamedPool<NameType, NameIdType, ValueType>>,
+    arena: RcRef<Arena<ValueType>>,
+}
+
+impl<NameType: Eq + Hash, NameIdType: Default + Copy + AddAssign + Eq + Hash, ValueType>
+    MonotonicNameMap<NameType, NameIdType, ValueType>
+{
+    pub fn new(pool: RcRef<MonotonicNamedPool<NameType, NameIdType, ValueType>>) -> Self {
+        Self {
+            name_map: HashMap::new(),
+            pool: pool.clone(),
+            arena: pool.borrow().arena.clone(),
+        }
+    }
+    pub fn get_name_id(&self, name: &NameType) -> Option<&NameIdType> {
+        self.name_map.get(name)
+    }
+    pub fn get_id(&self, name: &NameType) -> Option<Id<ValueType>> {
+        self.pool.borrow().get_id(self.get_name_id(name)?).cloned()
+    }
+    pub fn get(&self, key: &NameType) -> Option<Ref<ValueType>> {
+        self.get_from_id(self.get_id(key)?)
+    }
+    pub fn get_mut(&mut self, key: &NameType) -> Option<RefMut<ValueType>> {
+        self.get_mut_from_id(self.get_id(key)?)
+    }
+    pub fn get_from_id(&self, id: Id<ValueType>) -> Option<Ref<ValueType>> {
+        self.arena.filter_map(|arena| arena.get(id)).ok()
+    }
+    pub fn get_mut_from_id(&mut self, id: Id<ValueType>) -> Option<RefMut<ValueType>> {
+        self.arena.filter_map_mut(|arena| arena.get_mut(id)).ok()
+    }
+    pub fn insert(&mut self, name: NameType, value: ValueType) -> (NameIdType, Id<ValueType>) {
+        match self.get_name_id(&name) {
+            Some(name_id) => (*name_id, self.get_id(&name).unwrap()),
+            None => {
+                let name_id = self.pool.borrow_mut().id_gen.generate();
+                self.name_map.insert(name, name_id);
+                (name_id, self.arena.borrow_mut().alloc(value))
+            },
+        }
     }
 }
 
