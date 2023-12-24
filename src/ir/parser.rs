@@ -10,7 +10,7 @@ use thiserror::Error;
 use super::{
     lexer::{Token, TokenKind},
     ops::DataType,
-    FunctionId, FunctionNameId, FunctionRef, ProgramRef, Scope, SpaceId, SpaceNameId,
+    Function, FunctionId, FunctionNameId, FunctionRef, ProgramRef, Scope, SpaceId, SpaceNameId,
     SpaceSignature, WeakSpaceRef,
 };
 
@@ -154,11 +154,18 @@ impl<T: Iterator<Item = Token>> Parser<T> {
             Err(_) => Err(ParseError::new(ParseErrorKind::Format, Some(token.clone()))),
         }
     }
-    fn match_space(&mut self, function: Option<FunctionRef>) -> Result<SpaceNameId, ParseError> {
+
+    fn match_fn_param(&mut self, function: &mut Function) -> Result<SpaceNameId, ParseError> {
+        let data_type = self.match_data_type()?;
+        let name_token_content = self.match_token(TokenKind::SpaceId)?.content.clone();
+        let (name_id, _) = function.declare_local(name_token_content, Some(data_type));
+        Ok(name_id)
+    }
+    fn match_space(&mut self, function: Option<&mut Function>) -> Result<SpaceNameId, ParseError> {
         let cur = self.match_token(TokenKind::SpaceId)?;
         let cur_content = cur.content.clone();
         let (mut name_id, mut id) = match function {
-            Some(f) => f.borrow_mut().lookup_or_insert_space(cur_content.clone()),
+            Some(f) => f.lookup_or_insert_space(cur_content.clone()),
             None => self
                 .program
                 .borrow_mut()
@@ -241,6 +248,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
             .program
             .borrow_mut()
             .lookup_or_insert_function(function_name.clone());
+
         self.program
             .clone()
             .borrow()
@@ -256,11 +264,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
                 } else {
                     function.declared = true;
                     while self.match_token(TokenKind::CloseParen).is_err() {
-                        let (_, param_name) = self.match_parse::<String>()?;
-                        self.match_token(TokenKind::Colon)?;
-                        let param_type = self.match_data_type()?;
-                        let (name_id, _) =
-                            function.declare_local(param_name.clone(), Some(param_type));
+                        let name_id = self.match_fn_param(&mut function)?;
                         function.params.push(name_id);
                         let _ = self.match_token(TokenKind::Comma);
                     }
@@ -269,30 +273,46 @@ impl<T: Iterator<Item = Token>> Parser<T> {
             })
             .unwrap()
     }
-    fn match_fn_body(&mut self, fn_name_id: FunctionNameId, fn_id: FunctionId) {
-        self.program.borrow().get_function_mut(fn_id).map(|mut function| {
-            
-        });
+    fn match_block(&mut self, function: &mut Function) -> Result<(), ParseError> {
+        let block_id_token = self.match_token(TokenKind::BlockId)?;
+        let (_, block_id) = function.lookup_or_insert_block(block_id_token.content.clone());
+        self.program.borrow().get_block_mut(block_id);
+        todo!()
+    }
+    fn match_fn_body(&mut self, function: &mut Function) -> Result<(), ParseError> {
+        self.match_token(TokenKind::OpenBrace)?;
         todo!()
     }
     fn match_fn(&mut self) -> Result<(FunctionNameId, FunctionId), ParseError> {
-        if self.match_token(TokenKind::Impl).is_ok() {
+        // impl $fn_name { ... }
+        let ((fn_name_id, fn_id), match_body) = if self.match_token(TokenKind::Impl).is_ok() {
             let function_name_token = self.match_token(TokenKind::FunctionId)?.clone();
             let function_name = function_name_token.content.clone();
             let (fn_name_id, fn_id) = self
                 .program
                 .borrow_mut()
                 .lookup_or_insert_function(function_name.clone());
-            self.match_fn_body(fn_name_id, fn_id);
-            Ok((fn_name_id, fn_id))
+            ((fn_name_id, fn_id), true)
         } else {
+            // fn $fn_name (i64 x, i64 y, ...) { ... }
+            // fn $fn_name ([i64, 3] a, ...) stub
             self.match_token(TokenKind::Fn)?;
             let (fn_name_id, fn_id) = self.match_fn_header()?;
-            if self.match_token(TokenKind::Stub).is_err()  {
-                self.match_fn_body(fn_name_id, fn_id);
-            }
-            Ok((fn_name_id, fn_id))
+
+            (
+                (fn_name_id, fn_id),
+                self.match_token(TokenKind::Stub).is_err(),
+            )
+        };
+        if match_body {
+            self.program
+                .clone()
+                .borrow()
+                .get_function_mut(fn_id)
+                .map(|mut function| self.match_fn_body(&mut function))
+                .expect("Function is not declared unexpectedly")?;
         }
+        Ok((fn_name_id, fn_id))
     }
 }
 

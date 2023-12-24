@@ -18,20 +18,13 @@ use super::{AddressMarker, BlockType, IRInformation, JumpOperation, SpaceSignatu
 pub type CodeBlockId = Id<CodeBlock>;
 
 
-
+#[derive(Default)]
 pub struct CodeBlockGraphWeight {
     pub assignment_count: usize,
     pub variable_assignment_map: HashMap<SpaceSignature, Vec<usize>>,
 }
 
-impl CodeBlockGraphWeight {
-    pub fn new() -> Self {
-        Self {
-            assignment_count: 0,
-            variable_assignment_map: HashMap::new(),
-        }
-    }
-}
+
 
 impl Display for CodeBlockGraphWeight {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -43,7 +36,7 @@ impl Display for CodeBlockGraphWeight {
 
 impl From<Vec<IR>> for DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight> {
     fn from(src: Vec<IR>) -> Self {
-        let mut res = Self::new(CodeBlockGraphWeight::new());
+        let mut res = Self::new(CodeBlockGraphWeight::default());
         // res.weight.irs = src
         //     .into_iter()
         //     .map(|ir| Rc::new(RefCell::new(ir)))

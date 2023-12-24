@@ -210,7 +210,7 @@ impl Display for IR {
                     write!(f, "{:?} <- {:?} {:?} {:?}", var, v1, cmp, v2)
                 }
             },
-            IR::Jump(JumpOperation::Branch(v, true_br, false_br), info) => {
+            IR::Jump(JumpOperation::Branch(v, true_br, false_br), _info) => {
                 write!(f, "=> {:?} ? {} : {}", v, true_br, false_br)
             }
             IR::Jump(JumpOperation::Unconditional(m), _) => write!(f, "=> {}", m),
@@ -241,7 +241,7 @@ impl Function {
             local_names: HashMap::new(),
             blocks: MultiKeyArenaHashMap::new(program.borrow().block_arena.clone()),
             block_names: HashMap::new(),
-            graph: DataFlowGraph::new(CodeBlockGraphWeight::new()),
+            graph: DataFlowGraph::new(CodeBlockGraphWeight::default()),
             declared: false,
             program: program.clone(),
         }
@@ -411,6 +411,14 @@ impl Program {
     }
     pub fn get_function_mut(&self, id: FunctionId) -> Option<RefMut<Function>> {
         self.function_arena
+            .filter_map_mut(|arena| arena.get_mut(id))
+            .ok()
+    }
+    pub fn get_block(&self, id: CodeBlockId) -> Option<Ref<CodeBlock>> {
+        self.block_arena.filter_map(|arena| arena.get(id)).ok()
+    }
+    pub fn get_block_mut(&self, id: CodeBlockId) -> Option<RefMut<CodeBlock>> {
+        self.block_arena
             .filter_map_mut(|arena| arena.get_mut(id))
             .ok()
     }
