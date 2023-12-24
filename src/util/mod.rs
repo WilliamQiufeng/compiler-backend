@@ -1,6 +1,7 @@
 use std::{
     cell::{Ref, RefCell, RefMut},
-    collections::{HashMap, hash_map::Entry},
+    collections::{hash_map::Entry, HashMap},
+    fmt::Debug,
     hash::Hash,
     marker::PhantomData,
     ops::{Add, AddAssign, Deref, DerefMut},
@@ -8,6 +9,7 @@ use std::{
 };
 
 use id_arena::{Arena, Id};
+use thiserror::Error;
 pub(crate) type RcRef<T> = Rc<RefCell<T>>;
 pub(crate) type WeakRef<T> = Weak<RefCell<T>>;
 pub(crate) trait FromInner<T> {
@@ -264,6 +266,11 @@ impl<NameType: Eq + Hash, NameIdType: Default + Copy + AddAssign + Eq + Hash, Va
         (name_id, self.map.insert(name_id, value))
     }
 }
+#[derive(Debug, Error)]
+#[error("key {key:?} already exists")]
+pub struct KeyExistsError<NameType: Debug> {
+    key: NameType,
+}
 pub struct MonotonicNameMap<
     NameType: Eq + Hash,
     NameIdType: Default + Copy + AddAssign + Eq + Hash,
@@ -288,7 +295,9 @@ impl<NameType: Eq + Hash, NameIdType: Default + Copy + AddAssign + Eq + Hash, Va
         self.name_map.get(name)
     }
     pub fn get_name_id_and_id(&self, name: &NameType) -> Option<(NameIdType, Id<ValueType>)> {
-        self.name_map.get(name).map(|name_id| (*name_id, self.get_id(name).unwrap()))
+        self.name_map
+            .get(name)
+            .map(|name_id| (*name_id, self.get_id(name).unwrap()))
     }
     pub fn get_id_from_name_id(&self, name_id: &NameIdType) -> Option<Id<ValueType>> {
         self.pool.borrow().get_id(name_id).cloned()
@@ -317,11 +326,17 @@ impl<NameType: Eq + Hash, NameIdType: Default + Copy + AddAssign + Eq + Hash, Va
                 let id = self.arena.borrow().next_id();
                 self.arena.borrow_mut().alloc(value);
                 (name_id, id)
-            },
+            }
         }
     }
-    pub fn get_or_insert<F>(&mut self, name: NameType, initializer: F) -> (NameIdType, Id<ValueType>) 
-        where F : FnOnce(NameIdType, Id<ValueType>) -> ValueType {
+    pub fn get_or_insert<F>(
+        &mut self,
+        name: NameType,
+        initializer: F,
+    ) -> (NameIdType, Id<ValueType>)
+    where
+        F: FnOnce(NameIdType, Id<ValueType>) -> ValueType,
+    {
         match self.get_name_id(&name) {
             Some(name_id) => (*name_id, self.get_id(&name).unwrap()),
             None => {
@@ -331,7 +346,56 @@ impl<NameType: Eq + Hash, NameIdType: Default + Copy + AddAssign + Eq + Hash, Va
                 let value = initializer(name_id, id);
                 self.arena.borrow_mut().alloc(value);
                 (name_id, id)
-            },
+            }
+        }
+    }
+    pub fn insert_or_update<U, F>(
+        &mut self,
+        name: NameType,
+        initializer: F,
+        updater: U,
+    ) -> (NameIdType, Id<ValueType>)
+    where
+        U: FnOnce(&mut ValueType, NameIdType, Id<ValueType>),
+        F: FnOnce(NameIdType, Id<ValueType>) -> ValueType,
+    {
+        match self.get_name_id(&name) {
+            None => {
+                let name_id = self.pool.borrow_mut().id_gen.generate();
+                self.bind(name, name_id);
+                let id = self.arena.borrow().next_id();
+                let mut value = initializer(name_id, id);
+                updater(&mut value, name_id, id);
+                self.arena.borrow_mut().alloc(value);
+                (name_id, id)
+            }
+            Some(&name_id) => {
+                let id = self.get_id(&name).unwrap();
+                let mut value = self.get_mut_from_id(id).unwrap();
+                updater(&mut value, name_id, id);
+                (name_id, id)
+            }
+        }
+    }
+    pub fn try_insert<F>(
+        &mut self,
+        name: NameType,
+        initializer: F,
+    ) -> Result<(NameIdType, Id<ValueType>), KeyExistsError<NameType>>
+    where
+        F: FnOnce(NameIdType, Id<ValueType>) -> ValueType,
+        NameType: Debug,
+    {
+        match self.get_name_id(&name) {
+            Some(name_id) => Err(KeyExistsError { key: name }),
+            None => {
+                let name_id = self.pool.borrow_mut().id_gen.generate();
+                self.bind(name, name_id);
+                let id = self.arena.borrow().next_id();
+                let value = initializer(name_id, id);
+                self.arena.borrow_mut().alloc(value);
+                Ok((name_id, id))
+            }
         }
     }
     pub fn bind(&mut self, name: NameType, id: NameIdType) {

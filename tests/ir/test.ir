@@ -1,7 +1,7 @@
-ext fn @g: {[i32, 5], u64} @a -> void
-decl fn @h: {{{{u64}}}} @a -> void
+fn @g({[i32, 5], u64} @a) -> void ext
+fn @h({{{{u64}}}} @a) -> void stub
 
-fn @f: [i32, 5] @x, {i32, i64} @y -> void {
+fn @f([i32, 5] @x, {i32, i64} @y) -> void {
     #entry {
         %0 = 3
         %1 = @x + @y.0

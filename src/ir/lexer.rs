@@ -12,12 +12,14 @@ pub enum TokenKind {
     Fn,
     Stub,
     Impl,
+    Extern,
     OpenParen,
     CloseParen,
     OpenBrace,
     CloseBrace,
     OpenBracket,
     CloseBracket,
+    Terminator,
     Goto,
     Next,
     Ret,
@@ -247,6 +249,8 @@ impl<T: Iterator<Item = char>> Iterator for Tokenize<T> {
             '=' => {
                 if self.match_char('=').is_some() {
                     self.create_token(TokenKind::Eq)
+                } else if self.match_char('>').is_some() {
+                    self.create_token(TokenKind::Terminator)
                 } else {
                     self.create_token(TokenKind::Assign)
                 }
@@ -319,6 +323,13 @@ impl<T: Iterator<Item = char>> Iterator for Tokenize<T> {
                     self.create_token(TokenKind::Bool)
                 } else if self.match_one_or_more_range('0'..='1') {
                     self.create_token(TokenKind::IntBinLiteral)
+                } else {
+                    self.error_token()
+                }
+            }
+            'e' => {
+                if self.match_string("xt").is_some() {
+                    self.create_token(TokenKind::Extern)
                 } else {
                     self.error_token()
                 }

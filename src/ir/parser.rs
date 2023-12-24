@@ -7,7 +7,10 @@ use std::{
 
 use thiserror::Error;
 
+use crate::ir::{BlockType, IRInformation, IR};
+
 use super::{
+    block::CodeBlock,
     lexer::{Token, TokenKind},
     ops::DataType,
     Function, FunctionId, FunctionNameId, FunctionRef, ProgramRef, Scope, SpaceId, SpaceNameId,
@@ -38,6 +41,8 @@ pub enum ParseErrorKind {
     Format,
     #[error("function already declared: {name}")]
     FunctionAlreadyDeclared { name: String },
+    #[error("block already declared: {name}")]
+    BlockAlreadyDeclared { name: String },
 }
 #[derive(Error, Debug)]
 #[error("parse error at {}: {kind}", .current_token.clone().expect(""))]
@@ -176,7 +181,9 @@ impl<T: Iterator<Item = Token>> Parser<T> {
             let index_token = index_token.clone();
             self.program
                 .borrow()
-                .space_pool.borrow_mut().get_mut_from_id(id)
+                .space_pool
+                .borrow_mut()
+                .get_mut_from_id(id)
                 .map(|space| {
                     let fields = match space.signature {
                         crate::ir::SpaceSignature::Normal(_, ref fields) => fields,
@@ -240,7 +247,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
             )),
         }
     }
-    fn match_fn_header(&mut self) -> Result<(FunctionNameId, FunctionId), ParseError> {
+    fn match_fn_header(&mut self) -> Result<(FunctionNameId, FunctionId, bool), ParseError> {
         let function_name_token = self.match_token(TokenKind::FunctionId)?.clone();
         let function_name = function_name_token.content.clone();
         self.match_token(TokenKind::OpenParen)?;
@@ -252,9 +259,10 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         self.program
             .clone()
             .borrow_mut()
-            .functions.get_mut_from_id(fn_id)
+            .functions
+            .get_mut_from_id(fn_id)
             .map(|mut function| {
-                if function.declared {
+                if function.is_declared {
                     Err(ParseError::new(
                         ParseErrorKind::FunctionAlreadyDeclared {
                             name: function_name.clone(),
@@ -262,26 +270,51 @@ impl<T: Iterator<Item = Token>> Parser<T> {
                         Some(function_name_token.clone()),
                     ))
                 } else {
-                    function.declared = true;
+                    function.is_declared = true;
                     while self.match_token(TokenKind::CloseParen).is_err() {
                         let name_id = self.match_fn_param(&mut function)?;
                         function.params.push(name_id);
                         let _ = self.match_token(TokenKind::Comma);
                     }
-                    Ok((fn_name_id, fn_id))
+                    self.match_token(TokenKind::Goto)?;
+                    function.return_type = self.match_data_type()?;
+                    function.is_extern = self.match_token(TokenKind::Extern).is_ok();
+                    Ok((
+                        fn_name_id,
+                        fn_id,
+                        !function.is_extern && self.match_token(TokenKind::Stub).is_err(),
+                    ))
                 }
             })
             .unwrap()
     }
     fn match_block(&mut self, function: &mut Function) -> Result<(), ParseError> {
-        let block_id_token = self.match_token(TokenKind::BlockId)?;
-        let (_, block_id) = function.lookup_or_insert_block(block_id_token.content.clone());
-        self.program.borrow().block_pool.borrow().get_from_id(block_id);
-        todo!()
+        let block_name_token = self.match_token(TokenKind::BlockId)?.clone();
+        let block_name = block_name_token.content.clone();
+        self.match_token(TokenKind::OpenBrace)?;
+        function.blocks.insert_or_update(
+            block_name.clone(),
+            |name_id, id| {
+                CodeBlock::new(
+                    id,
+                    BlockType::Normal,
+                    vec![],
+                    IR::Jump(crate::ir::JumpOperation::Next, IRInformation::default()),
+                )
+            },
+            |mut block, name_id, id| {
+                while self.match_token(TokenKind::Terminator).is_err() {}
+            },
+        );
+        Ok(())
     }
     fn match_fn_body(&mut self, function: &mut Function) -> Result<(), ParseError> {
         self.match_token(TokenKind::OpenBrace)?;
-        todo!()
+        while self.match_token(TokenKind::CloseBrace).is_err() {
+            self.match_block(function)?;
+        }
+        function.is_defined = true;
+        Ok(())
     }
     fn match_fn(&mut self) -> Result<(FunctionNameId, FunctionId), ParseError> {
         // impl $fn_name { ... }
@@ -294,21 +327,20 @@ impl<T: Iterator<Item = Token>> Parser<T> {
                 .lookup_or_insert_function(function_name.clone());
             ((fn_name_id, fn_id), true)
         } else {
-            // fn $fn_name (i64 x, i64 y, ...) { ... }
-            // fn $fn_name ([i64, 3] a, ...) stub
+            // fn $fn_name (i64 x, i64 y, ...) -> bool { ... }
+            // fn $fn_name ([i64, 3] a, ...) -> i64 stub
+            // fn $fn_name ([i64, 3] a, ...) -> f64 ext
             self.match_token(TokenKind::Fn)?;
-            let (fn_name_id, fn_id) = self.match_fn_header()?;
+            let (fn_name_id, fn_id, match_body) = self.match_fn_header()?;
 
-            (
-                (fn_name_id, fn_id),
-                self.match_token(TokenKind::Stub).is_err(),
-            )
+            ((fn_name_id, fn_id), match_body)
         };
         if match_body {
             self.program
                 .clone()
                 .borrow_mut()
-                .functions.get_mut_from_id(fn_id)
+                .functions
+                .get_mut_from_id(fn_id)
                 .map(|mut function| self.match_fn_body(&mut function))
                 .expect("Function is not declared unexpectedly")?;
         }

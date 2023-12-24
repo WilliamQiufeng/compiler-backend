@@ -228,10 +228,13 @@ pub struct Function {
     pub name: String,
     pub name_id: FunctionNameId,
     pub params: Vec<SpaceNameId>,
+    pub return_type: DataType,
     pub locals: MonotonicNameMap<String, SpaceNameId, Space>,
     pub blocks: MonotonicNameMap<String, BlockNameId, CodeBlock>,
     pub graph: DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight>,
-    pub declared: bool,
+    pub is_declared: bool,
+    pub is_extern: bool,
+    pub is_defined: bool,
     program: ProgramRef,
 }
 impl Function {
@@ -240,10 +243,13 @@ impl Function {
             name,
             name_id,
             params: vec![],
+            return_type: DataType::Void,
             locals: program.borrow().space_pool.borrow().create_map(),
             blocks: program.borrow().block_pool.borrow().create_map(),
             graph: DataFlowGraph::new(CodeBlockGraphWeight::default()),
-            declared: false,
+            is_declared: false,
+            is_extern: false,
+            is_defined: false,
             program: program.clone(),
         }
     }

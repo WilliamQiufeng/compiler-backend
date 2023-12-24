@@ -5,7 +5,7 @@ use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
-use id_arena::{Id, DefaultArenaBehavior, ArenaBehavior};
+use id_arena::{ArenaBehavior, DefaultArenaBehavior, Id};
 use petgraph::graph::NodeIndex;
 
 type GraphBlockID = NodeIndex<u32>;
@@ -13,10 +13,12 @@ type GraphBlockID = NodeIndex<u32>;
 use crate::block::{Block, DataFlowGraph};
 use crate::reach_lattice::ReachLattice;
 
-use super::{AddressMarker, BlockType, IRInformation, JumpOperation, SpaceSignature, IR, SpaceId, BlockNameId};
+use super::{
+    AddressMarker, BlockNameId, BlockType, IRInformation, JumpOperation, SpaceId, SpaceSignature,
+    IR,
+};
 
 pub type CodeBlockId = Id<CodeBlock>;
-
 
 #[derive(Default)]
 pub struct CodeBlockGraphWeight {
@@ -24,15 +26,12 @@ pub struct CodeBlockGraphWeight {
     pub variable_assignment_map: HashMap<SpaceSignature, Vec<usize>>,
 }
 
-
-
 impl Display for CodeBlockGraphWeight {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "IRs:").expect("");
         Ok(())
     }
 }
-
 
 impl From<Vec<IR>> for DataFlowGraph<CodeBlockAnalysisNode, CodeBlockGraphWeight> {
     fn from(src: Vec<IR>) -> Self {
@@ -148,16 +147,11 @@ pub struct CodeBlockAnalysisNode {
     pub block: CodeBlockId,
     pub reach_in: ReachLattice,
     pub reach_out: ReachLattice,
-    pub node_index: NodeIndex
+    pub node_index: NodeIndex,
 }
 
 impl CodeBlock {
-    pub fn new(
-        id: CodeBlockId,
-        block_type: BlockType,
-        irs: Vec<IR>,
-        terminator: IR,
-    ) -> Self {
+    pub fn new(id: CodeBlockId, block_type: BlockType, irs: Vec<IR>, terminator: IR) -> Self {
         Self {
             id,
             block_type,
@@ -180,7 +174,7 @@ impl Display for CodeBlock {
 impl Display for CodeBlockAnalysisNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "{}", self.block.index())?;
-        
+
         writeln!(f, "IN = {}, OUT = {}", self.reach_in, self.reach_out)?;
         Ok(())
     }
