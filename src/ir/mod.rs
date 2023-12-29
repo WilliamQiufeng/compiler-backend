@@ -64,6 +64,15 @@ pub enum SpaceSignature {
     Normal(Option<DataType>, Vec<SpaceNameId>),
     Offset(SpaceNameId, usize, Option<DataType>, Vec<SpaceNameId>),
 }
+
+impl SpaceSignature {
+    pub fn get_type(&self) -> Option<DataType> {
+        match self {
+            SpaceSignature::Normal(ty, _) => ty.clone(),
+            SpaceSignature::Offset(_, _, ty, _) => ty.clone(),
+        }
+    }
+}
 pub struct Space {
     pub signature: SpaceSignature,
     pub scope: Scope,
@@ -107,15 +116,25 @@ pub trait Literal: Debug {
     where
         Self: Sized;
 }
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum Value {
     Int(IntValue),
+    Array(ArrayValue),
+    Struct(StructValue),
     Void,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct IntValue {
     pub value: i64,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ArrayValue {
+    pub value: Vec<SpaceNameId>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct StructValue {
+    pub value: Vec<SpaceNameId>,
 }
 
 impl Literal for IntValue {
@@ -161,10 +180,14 @@ pub enum Operation {
     Binary(BinaryOp, SpaceNameId, SpaceNameId),
     Unary(UnaryOp, SpaceNameId),
     Compare(CompareType, SpaceNameId, SpaceNameId),
+    Call(FunctionNameId),
+    Pop
 }
 
 #[derive(Debug)]
-pub enum CommandOperation {}
+pub enum CommandOperation {
+    Store(SpaceNameId, SpaceNameId),
+}
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -194,7 +217,7 @@ impl Display for IRInformation {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum IR {
-    Assignment(SpaceId, Operation, IRInformation),
+    Assignment(SpaceNameId, Operation, IRInformation),
     Jump(JumpOperation, IRInformation),
     Command(CommandOperation, IRInformation),
 }
@@ -204,14 +227,17 @@ impl Display for IR {
         match self {
             IR::Assignment(var, op, _) => match op {
                 Operation::Binary(op, v1, v2) => {
-                    write!(f, "{:?} <- {:?} {:?} {:?}", var, v1, op, v2)
+                    write!(f, "{:?} = {:?} {:?} {:?}", var, v1, op, v2)
                 }
                 Operation::Unary(op, v1) => {
-                    write!(f, "{:?} <- {:?} {:?}", var, op, v1)
+                    write!(f, "{:?} = {:?} {:?}", var, op, v1)
                 }
                 Operation::Compare(cmp, v1, v2) => {
-                    write!(f, "{:?} <- {:?} {:?} {:?}", var, v1, cmp, v2)
+                    write!(f, "{:?} = {:?} {:?} {:?}", var, v1, cmp, v2)
                 }
+                Operation::Call(function_id) => write!(f, "{:?} = call {:?}", var, function_id),
+                Operation::Pop => write!(f, "{:?} = pop", var),
+                
             },
             IR::Jump(JumpOperation::Branch(v, true_br, false_br), _info) => {
                 write!(f, "=> {:?} ? {} : {}", v, true_br, false_br)
@@ -286,7 +312,7 @@ impl Function {
     }
     pub fn lookup_or_insert_block(&mut self, name: String) -> (BlockNameId, CodeBlockId) {
         self.blocks.get_name_id_and_id(&name).unwrap_or_else(|| {
-            self.blocks.get_or_insert(name, |name_id, id| {
+            self.blocks.get_id_or_insert(name, |name_id, id| {
                 CodeBlock::new(
                     id,
                     BlockType::Normal,
@@ -300,11 +326,12 @@ impl Function {
 pub type FunctionRef = RcRef<Function>;
 
 pub struct Program {
-    pub space_pool: RcRef<MonotonicNamedPool<String, SpaceNameId, Space>>,
+    pub space_pool: RcRef<MonotonicNamedPool<SpaceNameId, Space>>,
     pub globals: MonotonicNameMap<String, SpaceNameId, Space>,
-    pub block_pool: RcRef<MonotonicNamedPool<String, BlockNameId, CodeBlock>>,
-    pub function_pool: RcRef<MonotonicNamedPool<String, FunctionNameId, Function>>,
+    pub block_pool: RcRef<MonotonicNamedPool<BlockNameId, CodeBlock>>,
+    pub function_pool: RcRef<MonotonicNamedPool<FunctionNameId, Function>>,
     pub functions: MonotonicNameMap<String, FunctionNameId, Function>,
+    pub constants: MonotonicNameMap<Value, SpaceNameId, Space>,
     weak_self: WeakRef<Self>,
 }
 pub type ProgramRef = RcRef<Program>;
@@ -319,6 +346,7 @@ impl Program {
             RefCell::new(Self {
                 globals: space_pool.clone().borrow().create_map(),
                 functions: function_pool.clone().borrow().create_map(),
+                constants: space_pool.clone().borrow().create_map(),
                 space_pool,
                 block_pool,
                 function_pool,
@@ -335,6 +363,25 @@ impl Program {
     pub fn lookup_or_insert_global(&mut self, name: &String) -> (SpaceNameId, SpaceId) {
         self.lookup_global_by_name(name)
             .unwrap_or_else(|| self.declare_global(name.clone(), None))
+    }
+    pub fn lookup_or_insert_constant(
+        &mut self,
+        data_type: DataType,
+        value: Value,
+    ) -> (SpaceNameId, SpaceId) {
+        self.constants.get_id_or_insert(value.clone(), |_, _| {
+            let members = match &value {
+                Value::Int(_) => vec![],
+                Value::Array(ArrayValue { value, .. }) => value.clone(),
+                Value::Struct(StructValue { value, .. }) => value.clone(),
+                Value::Void => vec![],
+            };
+            Space {
+                signature: SpaceSignature::Normal(Some(data_type), members),
+                scope: Scope::Global,
+                value: FlatLattice::Value(value),
+            }
+        })
     }
     pub fn declare_global(
         &mut self,
@@ -371,7 +418,7 @@ impl Program {
         self.space_pool.borrow_mut().insert(space)
     }
     pub fn lookup_or_insert_function(&mut self, name: String) -> (FunctionNameId, FunctionId) {
-        self.functions.get_or_insert(name.clone(), |name_id, id| {
+        self.functions.get_id_or_insert(name.clone(), |name_id, id| {
             Function::new(self.weak_self.upgrade().unwrap(), name, name_id)
         })
     }

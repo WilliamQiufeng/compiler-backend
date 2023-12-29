@@ -7,14 +7,17 @@ use std::{
 
 use thiserror::Error;
 
-use crate::ir::{BlockType, IRInformation, IR};
+use crate::ir::{
+    ops::{BinaryOp, Op, UnaryOp},
+    BlockType, IRInformation, Operation, IR,
+};
 
 use super::{
     block::CodeBlock,
     lexer::{Token, TokenKind},
     ops::DataType,
-    Function, FunctionId, FunctionNameId, FunctionRef, ProgramRef, Scope, SpaceId, SpaceNameId,
-    SpaceSignature, WeakSpaceRef,
+    ArrayValue, Function, FunctionId, FunctionNameId, IntValue, ProgramRef, Scope, SpaceId,
+    SpaceNameId, SpaceSignature, StructValue, Value, WeakSpaceRef,
 };
 
 pub struct Parser<T: Iterator<Item = Token>> {
@@ -43,6 +46,8 @@ pub enum ParseErrorKind {
     FunctionAlreadyDeclared { name: String },
     #[error("block already declared: {name}")]
     BlockAlreadyDeclared { name: String },
+    #[error("data type is not consistent: expected {expected}, found {found}")]
+    InconsistentDataType { expected: DataType, found: DataType },
 }
 #[derive(Error, Debug)]
 #[error("parse error at {}: {kind}", .current_token.clone().expect(""))]
@@ -160,13 +165,20 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         }
     }
 
+    fn format_error(&mut self) -> ParseError {
+        ParseError::new(ParseErrorKind::Format, Some(self.peek().clone()))
+    }
+
     fn match_fn_param(&mut self, function: &mut Function) -> Result<SpaceNameId, ParseError> {
         let data_type = self.match_data_type()?;
         let name_token_content = self.match_token(TokenKind::SpaceId)?.content.clone();
         let (name_id, _) = function.declare_local(name_token_content, Some(data_type));
         Ok(name_id)
     }
-    fn match_space(&mut self, function: Option<&mut Function>) -> Result<SpaceNameId, ParseError> {
+    fn match_space(
+        &mut self,
+        function: Option<&mut Function>,
+    ) -> Result<(SpaceNameId, SpaceId), ParseError> {
         let cur = self.match_token(TokenKind::SpaceId)?;
         let cur_content = cur.content.clone();
         let (mut name_id, mut id) = match function {
@@ -203,7 +215,125 @@ impl<T: Iterator<Item = Token>> Parser<T> {
                 })
                 .unwrap()?;
         }
-        Ok(name_id)
+        Ok((name_id, id))
+    }
+    fn match_int(&mut self) -> Result<(DataType, (SpaceNameId, SpaceId)), ParseError> {
+        Ok((
+            DataType::I64,
+            self.program.clone().borrow_mut().lookup_or_insert_constant(
+                DataType::I64,
+                Value::Int(match self.peek().kind.clone() {
+                    TokenKind::I64 => IntValue {
+                        value: self
+                            .peek()
+                            .content
+                            .parse()
+                            .map_err(|_| self.format_error())?,
+                    },
+                    TokenKind::IntBinLiteral => {
+                        let content = i64::from_str_radix(&self.peek().content[1..], 2)
+                            .map_err(|_| self.format_error())?;
+                        IntValue { value: content }
+                    }
+                    TokenKind::IntHexLiteral => {
+                        let content = i64::from_str_radix(&self.peek().content[1..], 16)
+                            .map_err(|_| self.format_error())?;
+                        IntValue { value: content }
+                    }
+                    _ => {
+                        return Err(ParseError::new(
+                            ParseErrorKind::Format,
+                            Some(self.peek().clone()),
+                        ))
+                    }
+                }),
+            ),
+        ))
+    }
+    fn match_value(
+        &mut self,
+        function: Option<&mut Function>,
+    ) -> Result<(DataType, (SpaceNameId, SpaceId)), ParseError> {
+        match self.peek().kind.clone() {
+            TokenKind::SpaceId => {
+                let (name_id, id) = self.match_space(function)?;
+                Ok((
+                    self.program
+                        .borrow()
+                        .space_pool
+                        .borrow()
+                        .get_from_id(id)
+                        .unwrap()
+                        .signature
+                        .get_type()
+                        .unwrap(),
+                    (name_id, id),
+                ))
+            }
+            TokenKind::I64 | TokenKind::IntBinLiteral | TokenKind::IntHexLiteral => {
+                self.match_int()
+            }
+            TokenKind::OpenBrace => {
+                let mut members_names = Vec::new();
+                let mut members = Vec::new();
+                let mut function = function;
+                while self.match_token(TokenKind::CloseBrace).is_err() {
+                    let (data_type, (name_id, _)) = self.match_value(function.as_deref_mut())?;
+                    members_names.push(name_id);
+                    members.push(data_type);
+                    let _ = self.match_token(TokenKind::Comma);
+                }
+
+                let data_type = DataType::Struct(members);
+                let value = StructValue {
+                    value: members_names,
+                };
+                Ok((
+                    data_type.clone(),
+                    self.program
+                        .borrow_mut()
+                        .lookup_or_insert_constant(data_type.clone(), Value::Struct(value)),
+                ))
+            }
+            TokenKind::OpenBracket => {
+                let mut members_names = Vec::new();
+                let mut element_type = None;
+                let mut function = function;
+                while self.match_token(TokenKind::CloseBracket).is_err() {
+                    let (data_type, (name_id, _)) = self.match_value(function.as_deref_mut())?;
+                    members_names.push(name_id);
+                    match element_type {
+                        Some(dt) if dt != data_type => {
+                            return Err(ParseError::new(
+                                ParseErrorKind::InconsistentDataType {
+                                    expected: dt,
+                                    found: data_type,
+                                },
+                                Some(self.peek().clone()),
+                            ))
+                        }
+                        None => element_type = Some(data_type),
+                        _ => (),
+                    }
+                    let _ = self.match_token(TokenKind::Comma);
+                }
+
+                let data_type = DataType::Array(
+                    Box::new(element_type.ok_or(self.format_error())?),
+                    members_names.len(),
+                );
+                let value = ArrayValue {
+                    value: members_names,
+                };
+                Ok((
+                    data_type.clone(),
+                    self.program
+                        .borrow_mut()
+                        .lookup_or_insert_constant(data_type.clone(), Value::Array(value)),
+                ))
+            }
+            _ => todo!(),
+        }
     }
     fn match_data_type(&mut self) -> Result<DataType, ParseError> {
         let first = self.consume();
@@ -288,24 +418,87 @@ impl<T: Iterator<Item = Token>> Parser<T> {
             })
             .unwrap()
     }
+    fn match_instruction(&mut self, function: &mut Function) -> Result<IR, ParseError> {
+        // %x
+        if let Ok((assign_space_name_id, _)) = self.match_space(Some(function)) {
+            // %x =
+            self.match_token(TokenKind::Assign)?;
+            // %x = %a
+            if let Ok((dt, (left_space_name_id, _))) = self.match_value(Some(function)) {
+                // %x = %a + %b
+                // or %x = %a
+                let op = match self.peek().kind {
+                    TokenKind::Add => Op::Binary(BinaryOp::Add),
+                    TokenKind::Sub => Op::Binary(BinaryOp::Sub),
+                    TokenKind::Mul => Op::Binary(BinaryOp::Mul),
+                    TokenKind::Div => Op::Binary(BinaryOp::Div),
+                    _ => Op::Unary(UnaryOp::Unit),
+                };
+                if let Op::Binary(op) = op {
+                    self.consume();
+                    let right_space_name_id = self.match_value(Some(function))?.1 .0;
+                    Ok(IR::Assignment(
+                        assign_space_name_id,
+                        Operation::Binary(op, left_space_name_id, right_space_name_id),
+                        IRInformation::default(),
+                    ))
+                } else if let Op::Unary(op) = op {
+                    Ok(IR::Assignment(
+                        assign_space_name_id,
+                        Operation::Unary(op, left_space_name_id),
+                        IRInformation::default(),
+                    ))
+                } else {
+                    unreachable!()
+                }
+            } else {
+                // %x = + %a
+                let op = match self.peek().kind.clone() {
+                    TokenKind::Not => UnaryOp::Not,
+                    TokenKind::Sub => UnaryOp::Negative,
+                    kind => {
+                        return Err(ParseError::new(
+                            ParseErrorKind::UnexpectedToken {
+                                expected: vec![TokenKind::Not, TokenKind::Sub, TokenKind::SpaceId],
+                                found: kind,
+                            },
+                            Some(self.peek().clone()),
+                        ))
+                    }
+                };
+                todo!()
+            }
+        } else {
+            todo!("Not assignment")
+        }
+    }
     fn match_block(&mut self, function: &mut Function) -> Result<(), ParseError> {
         let block_name_token = self.match_token(TokenKind::BlockId)?.clone();
         let block_name = block_name_token.content.clone();
         self.match_token(TokenKind::OpenBrace)?;
-        function.blocks.insert_or_update(
-            block_name.clone(),
-            |name_id, id| {
+        let (_, id) = function
+            .blocks
+            .get_id_or_insert(block_name.clone(), |_, id| {
                 CodeBlock::new(
                     id,
                     BlockType::Normal,
                     vec![],
                     IR::Jump(crate::ir::JumpOperation::Next, IRInformation::default()),
                 )
-            },
-            |mut block, name_id, id| {
-                while self.match_token(TokenKind::Terminator).is_err() {}
-            },
-        );
+            });
+        if let Some(mut block) = self
+            .program
+            .clone()
+            .borrow()
+            .block_pool
+            .borrow_mut()
+            .get_mut_from_id(id)
+        {
+            while self.match_token(TokenKind::Terminator).is_err() {
+                let instruction = self.match_instruction(function)?;
+                block.irs_range.push(instruction);
+            }
+        }
         Ok(())
     }
     fn match_fn_body(&mut self, function: &mut Function) -> Result<(), ParseError> {
@@ -393,8 +586,8 @@ mod tests {
         let r = parser.match_space(None);
         let r2 = parser.match_space(None);
         let r3 = parser.match_space(None);
-        assert_eq!(r.unwrap(), 0);
-        assert_eq!(r2.unwrap(), 0);
-        assert_eq!(r3.unwrap(), 1);
+        assert_eq!(r.unwrap().0, 0);
+        assert_eq!(r2.unwrap().0, 0);
+        assert_eq!(r3.unwrap().0, 1);
     }
 }

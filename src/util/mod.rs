@@ -116,6 +116,12 @@ impl<T> WeakFromInner<T> for WeakRef<T> {
 pub fn include<T: Clone, U, R>(t: T, f: impl FnOnce(T, U) -> R) -> impl FnOnce(U) -> R {
     move |u| f(t.clone(), u)
 }
+// pub fn use_option_mut<'a, T>(t: Option<&'a mut T>) -> Box<dyn FnMut() -> Option<&'a mut T> + 'a> {
+//     match t {
+//         Some(r) => Box::new(move || Some(r)),
+//         None => Box::new(|| None),
+//     }
+// }
 
 pub struct MonotonicIdGenerator<T> {
     next_id: T,
@@ -223,7 +229,6 @@ impl<K: Hash + Eq + Copy, V> MultiKeyArenaHashMap<K, V> {
 }
 
 pub struct MonotonicNamedPool<
-    NameType: Eq + Hash,
     NameIdType: Default + Copy + AddAssign + Eq + Hash,
     ValueType,
 > {
@@ -231,11 +236,10 @@ pub struct MonotonicNamedPool<
     map: MultiKeyArenaHashMap<NameIdType, ValueType>,
     id_gen: MonotonicIdGenerator<NameIdType>,
     weak_self: WeakRef<Self>,
-    _phantom: PhantomData<NameType>,
 }
 
-impl<NameType: Eq + Hash, NameIdType: Default + Copy + AddAssign + Eq + Hash, ValueType>
-    MonotonicNamedPool<NameType, NameIdType, ValueType>
+impl<NameIdType: Default + Copy + AddAssign + Eq + Hash, ValueType>
+    MonotonicNamedPool<NameIdType, ValueType>
 {
     pub fn new(name_id_increment: NameIdType) -> RcRef<Self> {
         RcRef::new_cyclic(|weak_self| {
@@ -245,11 +249,10 @@ impl<NameType: Eq + Hash, NameIdType: Default + Copy + AddAssign + Eq + Hash, Va
                 id_gen: MonotonicIdGenerator::new(name_id_increment),
                 weak_self: weak_self.clone(),
                 map: MultiKeyArenaHashMap::new(arena_ref),
-                _phantom: PhantomData,
             })
         })
     }
-    pub fn create_map(&self) -> MonotonicNameMap<NameType, NameIdType, ValueType> {
+    pub fn create_map<NameType: Eq + Hash>(&self) -> MonotonicNameMap<NameType, NameIdType, ValueType> {
         MonotonicNameMap::new(self.weak_self.upgrade().unwrap())
     }
     pub fn get_id(&self, name: &NameIdType) -> Option<&Id<ValueType>> {
@@ -277,14 +280,14 @@ pub struct MonotonicNameMap<
     ValueType,
 > {
     name_map: HashMap<NameType, NameIdType>,
-    pool: RcRef<MonotonicNamedPool<NameType, NameIdType, ValueType>>,
+    pool: RcRef<MonotonicNamedPool<NameIdType, ValueType>>,
     arena: RcRef<Arena<ValueType>>,
 }
 
 impl<NameType: Eq + Hash, NameIdType: Default + Copy + AddAssign + Eq + Hash, ValueType>
     MonotonicNameMap<NameType, NameIdType, ValueType>
 {
-    pub fn new(pool: RcRef<MonotonicNamedPool<NameType, NameIdType, ValueType>>) -> Self {
+    pub fn new(pool: RcRef<MonotonicNamedPool<NameIdType, ValueType>>) -> Self {
         Self {
             name_map: HashMap::new(),
             pool: pool.clone(),
@@ -329,7 +332,7 @@ impl<NameType: Eq + Hash, NameIdType: Default + Copy + AddAssign + Eq + Hash, Va
             }
         }
     }
-    pub fn get_or_insert<F>(
+    pub fn get_id_or_insert<F>(
         &mut self,
         name: NameType,
         initializer: F,

@@ -48,6 +48,8 @@ pub enum BinaryOp {
 pub enum UnaryOp {
     Not,
     Negative,
+    Load,
+    Push,
     Unit, // no-op
 }
 
