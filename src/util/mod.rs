@@ -320,15 +320,16 @@ impl<NameType: Eq + Hash, NameIdType: Default + Copy + AddAssign + Eq + Hash, Va
     pub fn get_mut_from_id(&mut self, id: Id<ValueType>) -> Option<RefMut<ValueType>> {
         self.arena.filter_map_mut(|arena| arena.get_mut(id)).ok()
     }
+    pub fn insert_nameless(&mut self, value: ValueType) -> (NameIdType, Id<ValueType>) {
+        self.pool.borrow_mut().insert(value)
+    }
     pub fn insert(&mut self, name: NameType, value: ValueType) -> (NameIdType, Id<ValueType>) {
         match self.get_name_id(&name) {
             Some(name_id) => (*name_id, self.get_id(&name).unwrap()),
             None => {
                 let name_id = self.pool.borrow_mut().id_gen.generate();
                 self.bind(name, name_id);
-                let id = self.arena.borrow().next_id();
-                self.arena.borrow_mut().alloc(value);
-                (name_id, id)
+                self.pool.borrow_mut().insert(value)
             }
         }
     }
@@ -343,12 +344,11 @@ impl<NameType: Eq + Hash, NameIdType: Default + Copy + AddAssign + Eq + Hash, Va
         match self.get_name_id(&name) {
             Some(name_id) => (*name_id, self.get_id(&name).unwrap()),
             None => {
-                let name_id = self.pool.borrow_mut().id_gen.generate();
+                let name_id = self.pool.borrow_mut().id_gen.peek_next_id();
                 self.bind(name, name_id);
                 let id = self.arena.borrow().next_id();
                 let value = initializer(name_id, id);
-                self.arena.borrow_mut().alloc(value);
-                (name_id, id)
+                self.pool.borrow_mut().insert(value)
             }
         }
     }
@@ -392,7 +392,7 @@ impl<NameType: Eq + Hash, NameIdType: Default + Copy + AddAssign + Eq + Hash, Va
         match self.get_name_id(&name) {
             Some(name_id) => Err(KeyExistsError { key: name }),
             None => {
-                let name_id = self.pool.borrow_mut().id_gen.generate();
+                let name_id = self.pool.borrow_mut().id_gen.peek_next_id();
                 self.bind(name, name_id);
                 let id = self.arena.borrow().next_id();
                 let value = initializer(name_id, id);
@@ -406,6 +406,16 @@ impl<NameType: Eq + Hash, NameIdType: Default + Copy + AddAssign + Eq + Hash, Va
     }
     pub fn entry(&mut self, name: NameType) -> Entry<NameType, NameIdType> {
         self.name_map.entry(name)
+    }
+    pub fn iter(&self) -> impl Iterator<Item = (&NameType, &NameIdType, Option<Ref<ValueType>>)> {
+        self.name_map.iter().map(|(k, v)| {
+            (
+                k,
+                v,
+                self.get_from_id(self.get_id(k).unwrap())
+            )
+        })
+        
     }
 }
 

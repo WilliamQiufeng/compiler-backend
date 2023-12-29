@@ -9,6 +9,7 @@ pub enum TokenKind {
     Dot,
     Colon,
     Comma,
+    QuestionMark,
     Fn,
     Stub,
     Impl,
@@ -20,7 +21,7 @@ pub enum TokenKind {
     OpenBracket,
     CloseBracket,
     Terminator,
-    Goto,
+    End,
     Next,
     Ret,
     Add,
@@ -39,6 +40,8 @@ pub enum TokenKind {
     Assign,
     Store,
     Load,
+    Param,
+    Call,
     I64,
     IntLiteral,
     IntBinLiteral,
@@ -246,6 +249,7 @@ impl<T: Iterator<Item = char>> Iterator for Tokenize<T> {
             '{' => self.create_token(TokenKind::OpenBrace),
             '}' => self.create_token(TokenKind::CloseBrace),
             '/' => self.create_token(TokenKind::Div),
+            '?' => self.create_token(TokenKind::QuestionMark),
             '=' => {
                 if self.match_char('=').is_some() {
                     self.create_token(TokenKind::Eq)
@@ -259,11 +263,7 @@ impl<T: Iterator<Item = char>> Iterator for Tokenize<T> {
             '*' => self.create_token(TokenKind::Mul),
             '-' => match self.match_num() {
                 TokenKind::Error => {
-                    if self.match_char('>').is_some() {
-                        self.create_token(TokenKind::Load)
-                    } else {
-                        self.create_token(TokenKind::Sub)
-                    }
+                    self.create_token(TokenKind::Sub)
                 }
                 kind => self.create_token(kind),
             },
@@ -327,9 +327,18 @@ impl<T: Iterator<Item = char>> Iterator for Tokenize<T> {
                     self.error_token()
                 }
             }
+            'c' => {
+                if self.match_string("all").is_some() {
+                    self.create_token(TokenKind::Call)
+                } else {
+                    self.error_token()
+                }
+            }
             'e' => {
                 if self.match_string("xt").is_some() {
                     self.create_token(TokenKind::Extern)
+                } else if self.match_string("nd").is_some() {
+                    self.create_token(TokenKind::End)
                 } else {
                     self.error_token()
                 }
@@ -359,9 +368,9 @@ impl<T: Iterator<Item = char>> Iterator for Tokenize<T> {
                     self.error_token()
                 }
             }
-            'g' => {
-                if self.match_string("oto").is_some() {
-                    self.create_token(TokenKind::Goto)
+            'l' => {
+                if self.match_string("oad").is_some() {
+                    self.create_token(TokenKind::Load)
                 } else {
                     self.error_token()
                 }
@@ -376,6 +385,13 @@ impl<T: Iterator<Item = char>> Iterator for Tokenize<T> {
             'o' => {
                 if self.match_string("r").is_some() {
                     self.create_token(TokenKind::Or)
+                } else {
+                    self.error_token()
+                }
+            }
+            'p' => {
+                if self.match_string("aram").is_some() {
+                    self.create_token(TokenKind::Param)
                 } else {
                     self.error_token()
                 }
@@ -426,6 +442,14 @@ mod tests {
     fn tokenization() {
         let src =
             "fn @a(@m: i64, @n: i64) -> i64 { %x = @m + @n %1 = -2.34 + h10F %2 = %1 - -b0101 }";
+        assert!(src.chars().tokenize().all(|t| {
+            println!("{}", t);
+            !matches!(t.kind, TokenKind::Error)
+        }));
+    }
+    #[test]
+    fn tokenization2() {
+        let src = include_str!("../../tests/ir/test.ir");
         assert!(src.chars().tokenize().all(|t| {
             println!("{}", t);
             !matches!(t.kind, TokenKind::Error)

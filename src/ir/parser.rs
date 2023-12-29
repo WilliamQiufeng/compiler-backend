@@ -7,22 +7,29 @@ use std::{
 
 use thiserror::Error;
 
-use crate::ir::{
-    ops::{BinaryOp, Op, UnaryOp},
-    BlockType, IRInformation, Operation, IR,
+use crate::{
+    ir::{
+        ops::{BinaryOp, Op, UnaryOp},
+        BlockType, IRInformation, Operation, IR,
+    },
+    util::{MonotonicNameMap, MonotonicNamedPool, RcRef},
 };
 
 use super::{
-    block::CodeBlock,
+    block::{CodeBlock, CodeBlockId},
     lexer::{Token, TokenKind},
     ops::DataType,
-    ArrayValue, Function, FunctionId, FunctionNameId, IntValue, ProgramRef, Scope, SpaceId,
-    SpaceNameId, SpaceSignature, StructValue, Value, WeakSpaceRef,
+    AddressMarker, ArrayValue, BlockNameId, Function, FunctionId, FunctionNameId, IntValue,
+    JumpOperation, ProgramRef, Scope, Space, SpaceId, SpaceNameId, SpaceSignature, StructValue,
+    Value, WeakSpaceRef,
 };
 
 pub struct Parser<T: Iterator<Item = Token>> {
     pub token_iter: Peekable<T>,
     program: ProgramRef,
+    block_pool: RcRef<MonotonicNamedPool<BlockNameId, CodeBlock>>,
+    space_pool: RcRef<MonotonicNamedPool<SpaceNameId, Space>>,
+    function_pool: RcRef<MonotonicNamedPool<FunctionNameId, Function>>,
     preloaded_tokens: VecDeque<Token>,
     buffer: VecDeque<VecDeque<Token>>,
 }
@@ -66,10 +73,14 @@ impl ParseError {
 }
 impl<T: Iterator<Item = Token>> Parser<T> {
     pub fn new(tokens: T) -> Self {
+        let program = super::Program::new();
         Parser {
             token_iter: tokens.peekable(),
             preloaded_tokens: VecDeque::new(),
-            program: super::Program::new(),
+            block_pool: program.clone().borrow().block_pool.clone(),
+            space_pool: program.clone().borrow().space_pool.clone(),
+            function_pool: program.clone().borrow().function_pool.clone(),
+            program,
             buffer: VecDeque::from([VecDeque::new()]),
         }
     }
@@ -191,9 +202,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         while self.match_token(TokenKind::Dot).is_ok() {
             let (index_token, index) = self.match_parse::<usize>()?;
             let index_token = index_token.clone();
-            self.program
-                .borrow()
-                .space_pool
+            self.space_pool
                 .borrow_mut()
                 .get_mut_from_id(id)
                 .map(|space| {
@@ -202,18 +211,18 @@ impl<T: Iterator<Item = Token>> Parser<T> {
                         crate::ir::SpaceSignature::Offset(_, _, _, ref fields) => fields,
                     };
                     name_id = fields.get(index).copied().unwrap();
-                    id = self.program.borrow().lookup_space(name_id).ok_or_else(|| {
-                        ParseError::new(
-                            ParseErrorKind::NotDeclared {
-                                name: cur_content.clone(),
-                            },
-                            Some(index_token),
-                        )
-                    })?;
 
                     Ok(())
                 })
                 .unwrap()?;
+            id = self.program.borrow().lookup_space(name_id).ok_or_else(|| {
+                ParseError::new(
+                    ParseErrorKind::NotDeclared {
+                        name: cur_content.clone(),
+                    },
+                    Some(index_token),
+                )
+            })?;
         }
         Ok((name_id, id))
     }
@@ -223,22 +232,23 @@ impl<T: Iterator<Item = Token>> Parser<T> {
             self.program.clone().borrow_mut().lookup_or_insert_constant(
                 DataType::I64,
                 Value::Int(match self.peek().kind.clone() {
-                    TokenKind::I64 => IntValue {
-                        value: self
-                            .peek()
+                    TokenKind::IntLiteral => {
+                        let value = self
+                            .consume()
                             .content
                             .parse()
-                            .map_err(|_| self.format_error())?,
-                    },
-                    TokenKind::IntBinLiteral => {
-                        let content = i64::from_str_radix(&self.peek().content[1..], 2)
                             .map_err(|_| self.format_error())?;
-                        IntValue { value: content }
+                        IntValue { value }
+                    }
+                    TokenKind::IntBinLiteral => {
+                        let value = i64::from_str_radix(&self.consume().content[1..], 2)
+                            .map_err(|_| self.format_error())?;
+                        IntValue { value }
                     }
                     TokenKind::IntHexLiteral => {
-                        let content = i64::from_str_radix(&self.peek().content[1..], 16)
+                        let value = i64::from_str_radix(&self.consume().content[1..], 16)
                             .map_err(|_| self.format_error())?;
-                        IntValue { value: content }
+                        IntValue { value }
                     }
                     _ => {
                         return Err(ParseError::new(
@@ -253,7 +263,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     fn match_value(
         &mut self,
         function: Option<&mut Function>,
-    ) -> Result<(DataType, (SpaceNameId, SpaceId)), ParseError> {
+    ) -> Result<(Option<DataType>, (SpaceNameId, SpaceId)), ParseError> {
         match self.peek().kind.clone() {
             TokenKind::SpaceId => {
                 let (name_id, id) = self.match_space(function)?;
@@ -265,13 +275,12 @@ impl<T: Iterator<Item = Token>> Parser<T> {
                         .get_from_id(id)
                         .unwrap()
                         .signature
-                        .get_type()
-                        .unwrap(),
+                        .get_type(),
                     (name_id, id),
                 ))
             }
-            TokenKind::I64 | TokenKind::IntBinLiteral | TokenKind::IntHexLiteral => {
-                self.match_int()
+            TokenKind::IntBinLiteral | TokenKind::IntHexLiteral | TokenKind::IntLiteral => {
+                self.match_int().map(|(data_type, (name_id, id))| (Some(data_type), (name_id, id)))
             }
             TokenKind::OpenBrace => {
                 let mut members_names = Vec::new();
@@ -280,7 +289,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
                 while self.match_token(TokenKind::CloseBrace).is_err() {
                     let (data_type, (name_id, _)) = self.match_value(function.as_deref_mut())?;
                     members_names.push(name_id);
-                    members.push(data_type);
+                    members.push(data_type.unwrap());
                     let _ = self.match_token(TokenKind::Comma);
                 }
 
@@ -289,7 +298,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
                     value: members_names,
                 };
                 Ok((
-                    data_type.clone(),
+                    Some(data_type.clone()),
                     self.program
                         .borrow_mut()
                         .lookup_or_insert_constant(data_type.clone(), Value::Struct(value)),
@@ -301,6 +310,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
                 let mut function = function;
                 while self.match_token(TokenKind::CloseBracket).is_err() {
                     let (data_type, (name_id, _)) = self.match_value(function.as_deref_mut())?;
+                    let data_type = data_type.unwrap();
                     members_names.push(name_id);
                     match element_type {
                         Some(dt) if dt != data_type => {
@@ -326,13 +336,13 @@ impl<T: Iterator<Item = Token>> Parser<T> {
                     value: members_names,
                 };
                 Ok((
-                    data_type.clone(),
+                    Some(data_type.clone()),
                     self.program
                         .borrow_mut()
                         .lookup_or_insert_constant(data_type.clone(), Value::Array(value)),
                 ))
             }
-            _ => todo!(),
+            _ => Err(self.format_error()),
         }
     }
     fn match_data_type(&mut self) -> Result<DataType, ParseError> {
@@ -378,13 +388,8 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         }
     }
     fn match_fn_header(&mut self) -> Result<(FunctionNameId, FunctionId, bool), ParseError> {
-        let function_name_token = self.match_token(TokenKind::FunctionId)?.clone();
-        let function_name = function_name_token.content.clone();
+        let (function_name, fn_name_id, fn_id) = self.match_fn_id()?;
         self.match_token(TokenKind::OpenParen)?;
-        let (fn_name_id, fn_id) = self
-            .program
-            .borrow_mut()
-            .lookup_or_insert_function(function_name.clone());
 
         self.program
             .clone()
@@ -397,7 +402,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
                         ParseErrorKind::FunctionAlreadyDeclared {
                             name: function_name.clone(),
                         },
-                        Some(function_name_token.clone()),
+                        Some(self.peek().clone()),
                     ))
                 } else {
                     function.is_declared = true;
@@ -406,7 +411,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
                         function.params.push(name_id);
                         let _ = self.match_token(TokenKind::Comma);
                     }
-                    self.match_token(TokenKind::Goto)?;
+                    self.match_token(TokenKind::Colon)?;
                     function.return_type = self.match_data_type()?;
                     function.is_extern = self.match_token(TokenKind::Extern).is_ok();
                     Ok((
@@ -424,7 +429,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
             // %x =
             self.match_token(TokenKind::Assign)?;
             // %x = %a
-            if let Ok((dt, (left_space_name_id, _))) = self.match_value(Some(function)) {
+            if let Ok((_, (left_space_name_id, _))) = self.match_value(Some(function)) {
                 // %x = %a + %b
                 // or %x = %a
                 let op = match self.peek().kind {
@@ -453,53 +458,103 @@ impl<T: Iterator<Item = Token>> Parser<T> {
                 }
             } else {
                 // %x = + %a
-                let op = match self.peek().kind.clone() {
-                    TokenKind::Not => UnaryOp::Not,
-                    TokenKind::Sub => UnaryOp::Negative,
-                    kind => {
-                        return Err(ParseError::new(
-                            ParseErrorKind::UnexpectedToken {
-                                expected: vec![TokenKind::Not, TokenKind::Sub, TokenKind::SpaceId],
-                                found: kind,
-                            },
-                            Some(self.peek().clone()),
-                        ))
-                    }
+                let token_kind = self.peek().kind.clone();
+                let valued_expr = match token_kind {
+                    TokenKind::Not => Some(UnaryOp::Not),
+                    TokenKind::Sub => Some(UnaryOp::Negative),
+                    TokenKind::Load => Some(UnaryOp::Load),
+                    TokenKind::Param => Some(UnaryOp::Param),
+                    _ => None,
                 };
-                todo!()
+                if let Some(op) = valued_expr {
+                    self.consume();
+                    Ok(IR::Assignment(
+                        assign_space_name_id,
+                        Operation::Unary(op, self.match_value(Some(function))?.1 .0),
+                        IRInformation::default(),
+                    ))
+                } else if let TokenKind::Call = token_kind {
+                    self.match_token(TokenKind::Call)?;
+                    let (_, fn_name_id, _) = self.match_fn_id()?;
+                    Ok(IR::Assignment(
+                        assign_space_name_id,
+                        Operation::Call(fn_name_id),
+                        IRInformation::default(),
+                    ))
+                } else {
+                    Err(ParseError::new(
+                        ParseErrorKind::UnexpectedToken {
+                            expected: vec![TokenKind::Not, TokenKind::Sub, TokenKind::SpaceId],
+                            found: token_kind,
+                        },
+                        Some(self.peek().clone()),
+                    ))
+                }
             }
         } else {
-            todo!("Not assignment")
+            todo!("commands")
+        }
+    }
+    fn match_terminator(&mut self, function: &mut Function) -> Result<IR, ParseError> {
+        if let Ok((_, name_id, _)) = self.match_block_id(function) {
+            Ok(IR::Jump(
+                JumpOperation::Unconditional(AddressMarker::new(name_id)),
+                IRInformation::default(),
+            ))
+        } else if let Ok((_, (name_id, _))) = self.match_value(Some(function)) {
+            self.match_token(TokenKind::QuestionMark)?;
+            let true_block = self.match_block_id(function)?;
+            self.match_token(TokenKind::Colon)?;
+            let false_block = self.match_block_id(function)?;
+            Ok(IR::Jump(
+                JumpOperation::Branch(
+                    name_id,
+                    AddressMarker::new(true_block.1),
+                    AddressMarker::new(false_block.1),
+                ),
+                IRInformation::default(),
+            ))
+        } else if self.match_token(TokenKind::Ret).is_ok() {
+            let val = self.match_value(Some(function))?;
+            Ok(IR::Jump(
+                JumpOperation::Ret(val.1 .0),
+                IRInformation::default(),
+            ))
+        } else if self.match_token(TokenKind::Next).is_ok() {
+            Ok(IR::Jump(JumpOperation::Next, IRInformation::default()))
+        } else {
+            self.match_token(TokenKind::End)?;
+            Ok(IR::Jump(JumpOperation::End, IRInformation::default()))
         }
     }
     fn match_block(&mut self, function: &mut Function) -> Result<(), ParseError> {
-        let block_name_token = self.match_token(TokenKind::BlockId)?.clone();
-        let block_name = block_name_token.content.clone();
+        let id = self.match_block_id(function)?.2;
         self.match_token(TokenKind::OpenBrace)?;
-        let (_, id) = function
-            .blocks
-            .get_id_or_insert(block_name.clone(), |_, id| {
-                CodeBlock::new(
-                    id,
-                    BlockType::Normal,
-                    vec![],
-                    IR::Jump(crate::ir::JumpOperation::Next, IRInformation::default()),
-                )
-            });
-        if let Some(mut block) = self
-            .program
-            .clone()
-            .borrow()
-            .block_pool
-            .borrow_mut()
-            .get_mut_from_id(id)
-        {
+        if let Some(mut block) = self.block_pool.clone().borrow_mut().get_mut_from_id(id) {
             while self.match_token(TokenKind::Terminator).is_err() {
                 let instruction = self.match_instruction(function)?;
                 block.irs_range.push(instruction);
             }
         }
+        let terminator = self.match_terminator(function)?;
+        self.block_pool
+            .clone()
+            .borrow_mut()
+            .get_mut_from_id(id)
+            .unwrap()
+            .terminator = terminator;
+        self.match_token(TokenKind::CloseBrace)?;
         Ok(())
+    }
+
+    fn match_block_id(
+        &mut self,
+        function: &mut Function,
+    ) -> Result<(String, BlockNameId, CodeBlockId), ParseError> {
+        let block_name_token = self.match_token(TokenKind::BlockId)?.clone();
+        let block_name = block_name_token.content.clone();
+        let (name_id, id) = function.lookup_or_insert_block(block_name.clone());
+        Ok((block_name, name_id, id))
     }
     fn match_fn_body(&mut self, function: &mut Function) -> Result<(), ParseError> {
         self.match_token(TokenKind::OpenBrace)?;
@@ -512,32 +567,43 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     fn match_fn(&mut self) -> Result<(FunctionNameId, FunctionId), ParseError> {
         // impl $fn_name { ... }
         let ((fn_name_id, fn_id), match_body) = if self.match_token(TokenKind::Impl).is_ok() {
-            let function_name_token = self.match_token(TokenKind::FunctionId)?.clone();
-            let function_name = function_name_token.content.clone();
-            let (fn_name_id, fn_id) = self
-                .program
-                .borrow_mut()
-                .lookup_or_insert_function(function_name.clone());
+            let (_info, fn_name_id, fn_id) = self.match_fn_id()?;
             ((fn_name_id, fn_id), true)
         } else {
-            // fn $fn_name (i64 x, i64 y, ...) -> bool { ... }
-            // fn $fn_name ([i64, 3] a, ...) -> i64 stub
-            // fn $fn_name ([i64, 3] a, ...) -> f64 ext
+            // fn $fn_name (i64 x, i64 y, ...) : bool { ... }
+            // fn $fn_name ([i64, 3] a, ...) : i64 stub
+            // fn $fn_name ([i64, 3] a, ...) : f64 ext
             self.match_token(TokenKind::Fn)?;
             let (fn_name_id, fn_id, match_body) = self.match_fn_header()?;
 
             ((fn_name_id, fn_id), match_body)
         };
         if match_body {
-            self.program
+            self.function_pool
                 .clone()
                 .borrow_mut()
-                .functions
                 .get_mut_from_id(fn_id)
                 .map(|mut function| self.match_fn_body(&mut function))
                 .expect("Function is not declared unexpectedly")?;
         }
         Ok((fn_name_id, fn_id))
+    }
+
+    fn match_fn_id(&mut self) -> Result<(String, FunctionNameId, FunctionId), ParseError> {
+        let function_name_token = self.match_token(TokenKind::FunctionId)?.clone();
+        let function_name = function_name_token.content.clone();
+        let (fn_name_id, fn_id) = self
+            .program
+            .borrow_mut()
+            .lookup_or_insert_function(function_name.clone());
+        Ok((function_name, fn_name_id, fn_id))
+    }
+    pub fn match_program(&mut self) -> Result<ProgramRef, ParseError> {
+        // todo!
+        while self.match_token(TokenKind::Eof).is_err() {
+            self.match_fn()?;
+        }
+        Ok(self.program.clone())
     }
 }
 
@@ -589,5 +655,22 @@ mod tests {
         assert_eq!(r.unwrap().0, 0);
         assert_eq!(r2.unwrap().0, 0);
         assert_eq!(r3.unwrap().0, 1);
+    }
+    #[test]
+    fn test_parser_program() {
+        let src = include_str!("../../tests/ir/test.ir");
+        let mut parser = Parser::new(src.chars().tokenize());
+        let program = parser.match_program();
+        match program {
+            Ok(ref program) => {
+                println!("{}", program.borrow());
+            }
+            Err(ref e) => {
+                println!("{}", e);
+            }
+        }
+        assert!(program.is_ok());
+        let program = program.unwrap();
+        println!("{}", program.borrow())
     }
 }

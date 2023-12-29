@@ -1,7 +1,7 @@
-fn @g({[i32, 5], u64} @a) -> void ext
-fn @h({{{{u64}}}} @a) -> void stub
+fn $g({[i64, 5], i64} @a) : void ext
+fn $h({{{{i64}}}} @a) : void stub
 
-fn @f([i32, 5] @x, {i32, i64} @y) -> void {
+fn $f([i64, 5] @x, {i64, i64} @y) : void {
     #entry {
         %0 = 3
         %1 = @x + @y.0
@@ -16,10 +16,10 @@ fn @f([i32, 5] @x, {i32, i64} @y) -> void {
     }
 }
 
-impl @h {
+impl $h {
     #entry {
-        @z <- @a
-        => ret
+        @z = load @a
+        => ret @z
     }
 }
 

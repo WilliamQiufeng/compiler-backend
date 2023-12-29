@@ -49,7 +49,7 @@ pub enum UnaryOp {
     Not,
     Negative,
     Load,
-    Push,
+    Param,
     Unit, // no-op
 }
 

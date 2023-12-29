@@ -181,7 +181,6 @@ pub enum Operation {
     Unary(UnaryOp, SpaceNameId),
     Compare(CompareType, SpaceNameId, SpaceNameId),
     Call(FunctionNameId),
-    Pop
 }
 
 #[derive(Debug)]
@@ -196,6 +195,7 @@ pub enum JumpOperation {
     Branch(SpaceNameId, AddressMarker, AddressMarker),
     Next,
     End,
+    Ret(SpaceNameId),
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -236,15 +236,14 @@ impl Display for IR {
                     write!(f, "{:?} = {:?} {:?} {:?}", var, v1, cmp, v2)
                 }
                 Operation::Call(function_id) => write!(f, "{:?} = call {:?}", var, function_id),
-                Operation::Pop => write!(f, "{:?} = pop", var),
-                
             },
             IR::Jump(JumpOperation::Branch(v, true_br, false_br), _info) => {
-                write!(f, "=> {:?} ? {} : {}", v, true_br, false_br)
+                write!(f, "{:?} ? {} : {}", v, true_br, false_br)
             }
-            IR::Jump(JumpOperation::Unconditional(m), _) => write!(f, "=> {}", m),
-            IR::Jump(JumpOperation::Next, _) => write!(f, "=> next"),
-            IR::Jump(JumpOperation::End, _) => write!(f, "=> end"),
+            IR::Jump(JumpOperation::Unconditional(m), _) => write!(f, "{}", m),
+            IR::Jump(JumpOperation::Next, _) => write!(f, "next"),
+            IR::Jump(JumpOperation::End, _) => write!(f, "end"),
+            IR::Jump(JumpOperation::Ret(v), _) => write!(f, "ret {:?}", v),
             IR::Command(op, _) => write!(f, "{:?}", op),
         }
     }
@@ -263,15 +262,38 @@ pub struct Function {
     pub is_defined: bool,
     program: ProgramRef,
 }
+
+impl Display for Function {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "fn {}({:?}) : {}{{",
+            self.name, self.params, self.return_type
+        )?;
+        for (_, _, b) in self.blocks.iter() {
+            if let Some(block) = b {
+                writeln!(f, "{}", block)?;
+            }
+        }
+        write!(f, "}}")?;
+        Ok(())
+    }
+}
 impl Function {
-    pub fn new(program: ProgramRef, name: String, name_id: FunctionNameId) -> Self {
+    pub fn new(
+        program: ProgramRef,
+        name: String,
+        name_id: FunctionNameId,
+        locals: MonotonicNameMap<String, SpaceNameId, Space>,
+        blocks: MonotonicNameMap<String, BlockNameId, CodeBlock>,
+    ) -> Self {
         Self {
             name,
             name_id,
             params: vec![],
             return_type: DataType::Void,
-            locals: program.borrow().space_pool.borrow().create_map(),
-            blocks: program.borrow().block_pool.borrow().create_map(),
+            locals,
+            blocks,
             graph: DataFlowGraph::new(CodeBlockGraphWeight::default()),
             is_declared: false,
             is_extern: false,
@@ -301,7 +323,7 @@ impl Function {
         name: String,
         data_type: Option<DataType>,
     ) -> (SpaceNameId, SpaceId) {
-        let (name_id, space_id) = self.program.borrow_mut().declare_space(
+        let (name_id, space_id) = self.declare_space(
             data_type,
             Scope::Local {
                 fn_name_id: self.name_id,
@@ -310,29 +332,63 @@ impl Function {
         self.locals.bind(name, name_id);
         (name_id, space_id)
     }
+    pub fn declare_space(
+        &mut self,
+        data_type: Option<DataType>,
+        scope: Scope,
+    ) -> (SpaceNameId, SpaceId) {
+        let members = match data_type.clone() {
+            Some(DataType::Array(elem_ty, len)) => (0..len)
+                .map(|_| {
+                    self.declare_space(Some(elem_ty.deref().clone()), scope.clone())
+                        .0
+                })
+                .collect(),
+            Some(DataType::Struct(members)) => members
+                .iter()
+                .map(|dt| self.declare_space(Some(dt.clone()), scope.clone()).0)
+                .collect(),
+            _ => vec![],
+        };
+        let space = Space {
+            signature: SpaceSignature::Normal(data_type, members),
+            scope,
+            value: FlatLattice::Top,
+        };
+        self.locals.insert_nameless(space)
+    }
     pub fn lookup_or_insert_block(&mut self, name: String) -> (BlockNameId, CodeBlockId) {
-        self.blocks.get_name_id_and_id(&name).unwrap_or_else(|| {
-            self.blocks.get_id_or_insert(name, |name_id, id| {
-                CodeBlock::new(
-                    id,
-                    BlockType::Normal,
-                    vec![],
-                    IR::Jump(JumpOperation::Next, IRInformation::default()),
-                )
-            })
+        self.blocks.get_id_or_insert(name, |name_id, id| {
+            CodeBlock::new(
+                id,
+                BlockType::Normal,
+                vec![],
+                IR::Jump(JumpOperation::Next, IRInformation::default()),
+            )
         })
     }
 }
 pub type FunctionRef = RcRef<Function>;
 
 pub struct Program {
-    pub space_pool: RcRef<MonotonicNamedPool<SpaceNameId, Space>>,
     pub globals: MonotonicNameMap<String, SpaceNameId, Space>,
     pub block_pool: RcRef<MonotonicNamedPool<BlockNameId, CodeBlock>>,
+    pub space_pool: RcRef<MonotonicNamedPool<SpaceNameId, Space>>,
     pub function_pool: RcRef<MonotonicNamedPool<FunctionNameId, Function>>,
     pub functions: MonotonicNameMap<String, FunctionNameId, Function>,
     pub constants: MonotonicNameMap<Value, SpaceNameId, Space>,
     weak_self: WeakRef<Self>,
+}
+
+impl Display for Program {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        for (_, _, func_opt) in self.functions.iter() {
+            if let Some(func) = func_opt {
+                writeln!(f, "{}", func)?;
+            }
+        }
+        Ok(())
+    }
 }
 pub type ProgramRef = RcRef<Program>;
 
@@ -418,8 +474,15 @@ impl Program {
         self.space_pool.borrow_mut().insert(space)
     }
     pub fn lookup_or_insert_function(&mut self, name: String) -> (FunctionNameId, FunctionId) {
-        self.functions.get_id_or_insert(name.clone(), |name_id, id| {
-            Function::new(self.weak_self.upgrade().unwrap(), name, name_id)
-        })
+        self.functions
+            .get_id_or_insert(name.clone(), |name_id, id| {
+                Function::new(
+                    self.weak_self.upgrade().unwrap(),
+                    name,
+                    name_id,
+                    self.space_pool.borrow().create_map(),
+                    self.block_pool.borrow().create_map(),
+                )
+            })
     }
 }

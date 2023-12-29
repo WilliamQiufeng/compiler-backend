@@ -163,7 +163,7 @@ impl CodeBlock {
 
 impl Display for CodeBlock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Block {:?}:", self.id)?;
+        writeln!(f, "Block {}:", self.id.index())?;
         self.irs_range
             .iter()
             .for_each(|ir| writeln!(f, "    {}", ir).expect(""));
